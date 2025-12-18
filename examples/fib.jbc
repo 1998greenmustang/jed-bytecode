@@ -1,0 +1,29 @@
+func fib
+	store_name n
+	
+	push_name n
+	push_lit 1
+	bin_op <=
+	return_if n
+	
+	push_name n
+	push_lit 2
+	bin_op -
+	call fib
+	store_temp
+	
+
+	push_name n
+	push_lit 1
+	bin_op -
+	call fib
+	
+	push_temp
+	bin_op +
+done
+
+func main
+	push_lit 5
+	call fib
+	call_builtin println
+done
