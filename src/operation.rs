@@ -32,6 +32,7 @@ pub enum BinOpKind {
     Sub,
     Mul,
     Div,
+    Mod,
 
     Eq,
     LessEq,
@@ -41,21 +42,6 @@ pub enum BinOpKind {
 }
 
 impl BinOpKind {
-    pub fn from_string(s: &String) -> Self {
-        match s.as_str() {
-            "+" => BinOpKind::Add,
-            "-" => BinOpKind::Sub,
-            "*" => BinOpKind::Mul,
-            "/" => BinOpKind::Div,
-            "==" => BinOpKind::Eq,
-            "<=" => BinOpKind::LessEq,
-            ">=" => BinOpKind::GreatEq,
-            "<" => BinOpKind::Lesser,
-            ">" => BinOpKind::Greater,
-            _ => panic!("Not implemented: {}", s),
-        }
-    }
-
     fn from_object(arg: Object) -> BinOpKind {
         match arg {
             val if val.1 == b"+" => BinOpKind::Add,
@@ -67,6 +53,7 @@ impl BinOpKind {
             val if val.1 == b">=" => BinOpKind::GreatEq,
             val if val.1 == b"<" => BinOpKind::Lesser,
             val if val.1 == b">" => BinOpKind::Greater,
+            val if val.1 == b"%" => BinOpKind::Mod,
             _ => panic!("Not implemented: {:?}", arg),
         }
     }
@@ -164,10 +151,7 @@ impl Operation {
             }
             Operation::PushLit(literal) => vm.obj_stack.push(*literal),
             Operation::PushName(name) => {
-                let frame = vm
-                    .call_stack
-                    .last()
-                    .unwrap_or_else(|| panic!("No frame on the call stack!"));
+                let frame = vm.call_stack.last();
                 vm.obj_stack.push(
                     frame
                         .get_local(name)
@@ -182,18 +166,12 @@ impl Operation {
             }
             Operation::Pop => todo!(),
             Operation::ReturnIf(name) => {
-                let b = vm
-                    .obj_stack
-                    .pop()
-                    .unwrap_or_else(|| panic!("No object on the object stack"));
+                let b = vm.obj_stack.pop();
                 assert_eq!(b.0, ObjectKind::Bool, "Object is not a boolean");
                 let bol: &str = unsafe { std::mem::transmute(b.1) };
                 match bol {
                     "true" => {
-                        let frame = vm
-                            .call_stack
-                            .pop()
-                            .unwrap_or_else(|| panic!("No frame on the call stack!"));
+                        let frame = vm.call_stack.pop();
                         vm.obj_stack.push(
                             frame
                                 .get_local(name)
@@ -207,37 +185,20 @@ impl Operation {
             }
             Operation::StoreConst(_) => todo!(),
             Operation::StoreName(name) => {
-                let frame = vm
-                    .call_stack
-                    .last_mut()
-                    .unwrap_or_else(|| panic!("No frame on the call stack!"));
-                frame.add_local(
-                    *name,
-                    vm.obj_stack
-                        .pop()
-                        .unwrap_or_else(|| panic!("No object on the obj stack!")),
-                );
+                let frame = vm.call_stack.last_mut();
+                frame.add_local(*name, vm.obj_stack.pop());
             }
             Operation::StoreTemp => {
-                let obj = vm
-                    .obj_stack
-                    .pop()
-                    .unwrap_or_else(|| panic!("No object on the obj stack!"));
+                let obj = vm.obj_stack.pop();
                 vm.temp = Some(obj);
             }
             Operation::Func(_) => {}
             Operation::Done => {
-                let frame = vm
-                    .call_stack
-                    .pop()
-                    .unwrap_or_else(|| panic!("No frame on the call stack!"));
+                let frame = vm.call_stack.pop();
                 vm.counter = frame.return_address;
             }
             Operation::CallBuiltIn(built_in) => {
-                let obj = vm
-                    .obj_stack
-                    .pop()
-                    .unwrap_or_else(|| panic!("No object on the obj stack!"));
+                let obj = vm.obj_stack.pop();
                 built_in.call(obj);
             }
         }

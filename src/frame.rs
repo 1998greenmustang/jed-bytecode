@@ -1,16 +1,17 @@
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
-use crate::object::Object;
+use crate::{map::Map, object::Object};
 
 pub struct Frame {
-    locals: HashMap<Object, Object>,
+    // String -> Literal
+    locals: BTreeMap<Object, Object>,
     pub return_address: usize,
 }
 
 impl Frame {
     pub fn new(return_address: usize) -> Self {
         Frame {
-            locals: Default::default(),
+            locals: BTreeMap::new(),
             return_address,
         }
     }

@@ -40,6 +40,10 @@ impl VM {
     }
 
     pub fn run(&mut self) {
+        self.counter = *self
+            .program
+            .get_func(&Object(ObjectKind::Func, "main".as_bytes()))
+            .unwrap_or_else(|| panic!("No main func!"));
         loop {
             if self.counter == self.program.instructions.len() - 1 {
                 return;
@@ -58,9 +62,9 @@ impl VM {
 
     #[inline]
     pub fn next(&mut self) -> Option<Operation> {
-        let op = self.program.instructions[self.counter];
+        let op = self.program.get_op(self.counter);
         self.counter += 1;
-        return Some(op);
+        return Some(*op);
     }
 
     pub fn jump(&mut self, func: &Object) {
@@ -71,14 +75,8 @@ impl VM {
     }
 
     pub fn handle_bin_op(&mut self, kind: &BinOpKind) {
-        let rhs = self
-            .obj_stack
-            .pop()
-            .unwrap_or_else(|| panic!("Not enough on the stack"));
-        let lhs = self
-            .obj_stack
-            .pop()
-            .unwrap_or_else(|| panic!("Not enough on the stack"));
+        let rhs = self.obj_stack.pop();
+        let lhs = self.obj_stack.pop();
 
         self.obj_stack
             .push(self.program.handle_bin_op(*kind, lhs, rhs))

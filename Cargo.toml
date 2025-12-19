@@ -1,8 +1,23 @@
 [package]
-name = "jar-vm"
+name = "jar"
 version = "0.1.0"
 
 [lints.clippy]
 pedantic = "warn"
 
+[profile.dev]
+# opt-level = 0 # results in ~1 second times for recursiev fib
+opt-level = 1
+
+[profile.profiling]
+inherits = "release"
+debug = true
+
 [dependencies]
+
+[[bench]]
+name = "benchmark"
+harness = false
+
+[dev-dependencies]
+criterion = "0.5.1"

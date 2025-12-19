@@ -1,0 +1,36 @@
+#[derive(Debug)]
+pub struct Stack<T>(Vec<T>);
+
+impl<T> Stack<T> {
+    pub fn new() -> Stack<T> {
+        Stack(vec![])
+    }
+
+    pub fn push(&mut self, elem: T) {
+        self.0.push(elem)
+    }
+
+    pub fn pop(&mut self) -> T {
+        match self.0.pop() {
+            Some(v) => v,
+            None => todo!(),
+        }
+    }
+
+    pub fn len(&mut self) -> usize {
+        self.0.len()
+    }
+
+    pub fn last(&mut self) -> &T {
+        match self.0.last() {
+            Some(v) => v,
+            None => todo!(),
+        }
+    }
+    pub fn last_mut(&mut self) -> &mut T {
+        match self.0.last_mut() {
+            Some(v) => v,
+            None => todo!(),
+        }
+    }
+}

@@ -1,0 +1,4 @@
+func main
+  push_lit "Hello world!
+  call_builtin println
+done
