@@ -62,17 +62,26 @@ impl<T> Stack<T> {
 
     pub fn pop(&mut self) -> T {
         if self.len == 0 {
-            panic!("Nothing on the stack")
+            panic!("pop(): Nothing on the stack")
         }
         self.len -= 1;
         unsafe { ptr::read(self.ptr.as_ptr().add(self.len)) }
+    }
+    pub unsafe fn pop_n(&mut self, n: usize) -> &[T] {
+        if n > self.len {
+            panic!("Not enough to give you!")
+        } else {
+            let nth = &*self.ptr.as_ptr().add(self.len - n);
+            self.len -= n;
+            std::slice::from_raw_parts(nth, n)
+        }
     }
 
     pub fn len(&mut self) -> usize {
         self.len
     }
 
-    pub fn last(&mut self) -> &T {
+    pub fn last(&self) -> &T {
         if self.len == 0 {
             panic!("Nothing on the stack")
         } else {
@@ -84,6 +93,29 @@ impl<T> Stack<T> {
             panic!("Nothing on the stack")
         } else {
             unsafe { &mut *self.ptr.as_ptr().add(self.len - 1) }
+        }
+    }
+    pub fn last_mut_option(&mut self) -> Option<&mut T> {
+        if self.len == 0 {
+            panic!("Nothing on the stack")
+        } else {
+            unsafe { Some(&mut *self.ptr.as_ptr().add(self.len - 1)) }
+        }
+    }
+    pub fn last_option(&mut self) -> Option<&T> {
+        if self.len == 0 {
+            None
+        } else {
+            unsafe { Some(&*self.ptr.as_ptr().add(self.len - 1)) }
+        }
+    }
+
+    pub unsafe fn last_n(&self, n: usize) -> &[T] {
+        if n > self.len {
+            panic!("Not enough to give you!")
+        } else {
+            let nth = &*self.ptr.as_ptr().add(self.len - n);
+            std::slice::from_raw_parts(nth, n)
         }
     }
 }

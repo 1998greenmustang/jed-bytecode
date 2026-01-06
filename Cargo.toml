@@ -6,8 +6,8 @@ version = "0.1.0"
 pedantic = "warn"
 
 [profile.dev]
-# opt-level = 0 # results in ~1 second times for recursiev fib
-opt-level = 1
+opt-level = 0 # results in ~1 second times for recursiev fib
+# opt-level = 1
 
 [profile.profiling]
 inherits = "release"

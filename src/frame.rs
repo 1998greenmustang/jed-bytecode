@@ -1,18 +1,30 @@
 use std::collections::BTreeMap;
 
-use crate::{map::Map, object::Object};
+use crate::{map::Map, object::Object, program::MemoKey};
 
+#[derive(PartialEq, Eq, Debug)]
+pub enum FrameKind {
+    Loop,
+    Call,
+    Main,
+}
+
+#[derive(Debug)]
 pub struct Frame {
     // String -> Literal
     locals: BTreeMap<Object, Object>,
     pub return_address: usize,
+    pub memo_key: MemoKey,
+    pub kind: FrameKind,
 }
 
 impl Frame {
-    pub fn new(return_address: usize) -> Self {
+    pub fn new(return_address: usize, kind: FrameKind) -> Self {
         Frame {
+            memo_key: (0, &[]),
             locals: BTreeMap::new(),
             return_address,
+            kind,
         }
     }
 
@@ -25,5 +37,9 @@ impl Frame {
 
     pub fn get_local(&self, name: &Object) -> Option<Object> {
         self.locals.get(name).cloned()
+    }
+
+    pub fn copy_locals(&mut self, other: &Self) {
+        self.locals = other.locals.clone()
     }
 }

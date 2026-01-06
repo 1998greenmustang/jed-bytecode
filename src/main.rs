@@ -1,88 +1,109 @@
 mod arena;
+// mod file;
+mod binops;
+mod builtin;
 mod frame;
-mod literal;
+mod indexmap;
 mod map;
+mod mutable;
 mod object;
 mod operation;
 mod program;
 mod stack;
 mod vm;
-use std::{
-    fs::File,
-    io::{self, Read, Write},
-    mem,
-};
 
-use program::Program;
+// use file::saveable::Saveable;
 use vm::VM;
-unsafe fn any_as_u8_slice<T: Sized>(p: &T) -> &[u8] {
-    core::slice::from_raw_parts((p as *const T) as *const u8, core::mem::size_of::<T>())
-}
-
-fn save_byc(filepath: &str, data: &[u8]) -> io::Result<()> {
-    let mut file = File::create(filepath)?;
-    file.write_all(data)?;
-    Ok(())
-}
-
-unsafe fn load_byc(filepath: &str) -> io::Result<Program> {
-    let mut file = File::open(filepath)?;
-
-    let bytes: &mut [u8; mem::size_of::<Program>()] = &mut [0 as u8; mem::size_of::<Program>()];
-    File::read(&mut file, bytes)?;
-    // let data: *const [u8; mem::size_of::<Program>()] =
-    //     bytes as *const [u8; mem::size_of::<Program>()];
-
-    let p: *const [u8; std::mem::size_of::<Program>()] =
-        bytes as *const [u8; std::mem::size_of::<Program>()];
-    let s: Program = unsafe { std::mem::transmute(*p) };
-    Ok(s)
-}
 
 fn main() {
     let mut vm = VM::from_string(
-        "func fib\n\t\
-             store_name n\n\t\
+        "
+            
+func fib 1
+	store_name n
 
-             push_name n\n\t\
-             push_lit 1\n\t\
-          	bin_op <=\n\t\
-          	return_if n\n\n\t\
+	push_lit 0
+	store_name a
+	
+	push_lit 1
+	store_name b
 
-          	push_name n\n\t\
-          	push_lit 2\n\t\
-          	bin_op -\n\t\
-          	call fib\n\t\
+	push_name n
+	do_for
+		push_name b
+		store_name a
 
-          	push_name n\n\t\
-          	push_lit 1\n\t\
-          	bin_op -\n\t\
-          	call fib\n\n\t\
+		push_name a
+		push_name b
+		bin_op +
+		store_name b
+	done
 
-          	bin_op +\n\
-          done\n\
+	push_name a
+done
+	
+		
+done
 
-          func main\n\t\
-              push_lit 25\n\t\
-              call fib\n\t\
-              call_builtin println\n\
-          done"
-            .to_owned(),
+func main 0
+	push_lit 0
+	push_lit 1
+	push_lit 2
+	push_lit 3
+	push_lit 4
+	create_list 5
+	store_name nums
+
+	push_lit 0
+	store_name i
+	push_lit 5
+	do_for
+		push_name nums
+		push_name i
+		list_get
+		call fib
+
+		push_name nums
+		push_name i
+		list_set
+			
+		push_name nums
+		push_name i
+		push_lit 1
+		bin_op +
+		store_name i
+	done
+
+	push_name nums
+	call_builtin println
+exit
+        "
+        .to_owned(),
     );
 
-    let bytes: &[u8] = unsafe { any_as_u8_slice(&vm.program) };
-    let res = save_byc("./byc.jbc", bytes);
-    match res {
-        Ok(_) => {}
-        Err(_) => todo!(),
-    }
-
-    // let program = match unsafe { load_byc("./byc.jbc") } {
-    //     Ok(p) => p,
+    // match vm.program.save("./fib.jbc") {
+    //     Ok(_) => println!("saed as a hell"),
     //     Err(_) => todo!(),
-    // };
+    // }
+
+    // let program = program::Program::load("./fib.jbc");
+
+    // match program {
+    //     Ok(p) => {
+    //         println!("loaded as a hell");
+    //         let mut vm = VM::new(p);
+    //         vm.run();
+    //     }
+    //     Err(_) => todo!(),
+    // }
+
+    // // let program = match unsafe { load_byc("./byc.jbc") } {
+    // //     Ok(p) => p,
+    // //     Err(_) => todo!(),
+    // // };
     // println!("after");
     // // println!("{program:?}");
     // let mut vm = VM::new(program);
+    println!("running as a hell");
     vm.run();
 }

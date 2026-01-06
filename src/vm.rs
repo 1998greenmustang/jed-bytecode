@@ -1,10 +1,10 @@
-use std::collections::HashMap;
-
 use crate::{
-    arena::Dropless,
-    frame::Frame,
+    binops::BinOpKind,
+    frame::{Frame, FrameKind},
+    indexmap::IndexMap,
+    mutable::MutableObject,
     object::{Object, ObjectKind},
-    operation::{BinOpKind, Operation},
+    operation::Operation,
     program::Program,
     stack::Stack,
 };
@@ -13,25 +13,41 @@ pub struct VM {
     pub program: Program,
     pub counter: usize,
     pub call_stack: Stack<Frame>,
-    // pub heap: HashMap<String, Object>,
+    pub heap: IndexMap<MutableObject>,
     pub obj_stack: Stack<Object>,
     pub temp: Option<Object>,
 }
 
 impl VM {
+    // TODO add "consts" so we don't to CONSTANTLY fresh new objects for the same literal
     pub fn new(program: Program) -> Self {
         let mut call_stack = Stack::new();
-        call_stack.push(Frame::new(program.instructions.len()));
+        call_stack.push(Frame::new(program.instructions.len(), FrameKind::Main));
         VM {
             call_stack,
-            counter: *program
-                .get_func(&Object(ObjectKind::Func, "main".as_bytes()))
-                .unwrap_or_else(|| panic!("No main func!")),
+            counter: program.get_main(),
             program,
-            // heap: HashMap::<String, Object>::new(),
+            heap: IndexMap::new(),
             obj_stack: Stack::new(),
             temp: None,
         }
+    }
+
+    pub fn create_list(&mut self, n: usize) -> usize {
+        let objects = unsafe { self.obj_stack.pop_n(n) };
+        let items: Vec<MutableObject> = objects.iter().map(|o| (*o).into()).collect();
+        let idxs: Vec<usize> = items.iter().map(|i| self.heap.push(*i)).collect();
+        let objs: Vec<Object> = idxs
+            .iter()
+            .map(|idx| {
+                Object(
+                    ObjectKind::MutablePtr,
+                    self.program.register(&idx.to_be_bytes()),
+                )
+            })
+            .collect();
+        let registered_objs = self.program.register_objects(objs.as_slice());
+        self.heap.push(MutableObject::List(registered_objs))
     }
 
     pub fn from_string(text: String) -> Self {
@@ -40,23 +56,42 @@ impl VM {
     }
 
     pub fn run(&mut self) {
-        self.counter = *self
-            .program
-            .get_func(&Object(ObjectKind::Func, "main".as_bytes()))
-            .unwrap_or_else(|| panic!("No main func!"));
+        self.counter = self.program.get_main();
         loop {
             if self.counter == self.program.instructions.len() - 1 {
                 return;
             }
-            if self.call_stack.len() > 100_000 || self.obj_stack.len() > 1_000_000 {
-                panic!("stack overflow");
+            if self.call_stack.len() > 100_000 {
+                panic!("call stack overflow");
             }
-            // println!(
-            //     "pc: {}, tmp: {:?}, objstack: {:?}",
-            //     self.counter, self.temp, self.obj_stack
-            // );
+            if self.obj_stack.len() > 1_000_000 {
+                unsafe {
+                    panic!(
+                        "object stack overflow, {:?}",
+                        self.obj_stack
+                            .last_n(10)
+                            .iter()
+                            .map(|x| format!("{}", x))
+                            .collect::<Vec<String>>()
+                    )
+                }
+            }
             let op = self.next();
+            println!(
+                "op: {:?}, pc: {}, tmp: {:?}, objstack: {:?}",
+                op.unwrap(),
+                self.counter,
+                self.temp,
+                self.obj_stack
+            );
             op.unwrap().call(self);
+            if let Operation::Exit = self.program.get_op(self.counter) {
+                self.counter = self.program.get_main();
+                self.obj_stack = Stack::new();
+                self.call_stack = Stack::new();
+                self.program.memos.clear();
+                return;
+            }
         }
     }
 
@@ -68,15 +103,21 @@ impl VM {
     }
 
     pub fn jump(&mut self, func: &Object) {
-        self.counter = *self
+        let (idx, _arity) = *self
             .program
             .get_func(func)
             .unwrap_or_else(|| panic!("No such function: {:?}", func));
+        self.counter = idx;
+    }
+
+    pub fn goto(&mut self, counter: usize) {
+        self.counter = counter
     }
 
     pub fn handle_bin_op(&mut self, kind: &BinOpKind) {
-        let rhs = self.obj_stack.pop();
-        let lhs = self.obj_stack.pop();
+        let pair = unsafe { self.obj_stack.pop_n(2) };
+        let lhs = pair[0];
+        let rhs = pair[1];
 
         self.obj_stack
             .push(self.program.handle_bin_op(*kind, lhs, rhs))

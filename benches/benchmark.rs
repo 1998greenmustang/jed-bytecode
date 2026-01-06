@@ -5,8 +5,10 @@ use jar::vm::{self, VM};
 use std::hint::black_box;
 
 fn criterion_benchmark(c: &mut Criterion) {
-    let mut vm = VM::from_string(
-        "func fib\n\t\
+    c.bench_function("vm - mystack", |b| {
+        b.iter(|| {
+            black_box(VM::from_string(
+                "func fib 1\n\t\
              store_name n\n\t\
 
              push_name n\n\t\
@@ -27,15 +29,13 @@ fn criterion_benchmark(c: &mut Criterion) {
           	bin_op +\n\
           done\n\
 
-          func main\n\t\
-              push_lit 25\n\t\
+          func main 0\n\t\
+              push_lit 35\n\t\
               call fib\n\t\
           done"
-            .to_owned(),
-    );
-    c.bench_function("vm - mystack", |b| {
-        b.iter(|| {
-            vm.run();
+                    .to_owned(),
+            ))
+            .run();
         })
     });
 }

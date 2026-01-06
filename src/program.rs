@@ -1,22 +1,33 @@
-use std::{array, collections::BTreeMap};
+use std::collections::{BTreeMap, HashMap};
 
 use crate::{
     arena::Dropless,
-    frame::Frame,
-    map::Map,
+    binops::BinOpKind,
     object::{Object, ObjectKind},
-    operation::{BinOpKind, Operation},
+    operation::Operation,
 };
 
+type Arity = usize;
 type Index = usize;
+
+pub type MemoKey = (Index, &'static [Object]);
+type MemoTable = HashMap<MemoKey, Object>;
 
 pub struct Program {
     pub arena: Dropless,
     pub instructions: Vec<Operation>,
-    pub funcs: BTreeMap<Object, Index>,
+    pub funcs: BTreeMap<Object, (Index, Arity)>,
+    pub memos: MemoTable,
 }
 
 impl Program {
+    pub fn get_main(&self) -> Index {
+        let lbl = &Object(ObjectKind::Func, "main".as_bytes());
+        let (idx, _) = self
+            .get_func(lbl)
+            .unwrap_or_else(|| panic!("No main func!"));
+        return *idx;
+    }
     pub fn get_op(&self, idx: usize) -> &Operation {
         self.instructions.get(idx).unwrap()
     }
@@ -30,7 +41,7 @@ impl Program {
             let bytes = number.parse::<f64>().ok().unwrap().to_be_bytes();
             Object(ObjectKind::Float, self.register(&bytes))
         } else {
-            let bytes = i64::from_str_radix(number, 10).ok().unwrap().to_be_bytes();
+            let bytes = number.parse::<i64>().ok().unwrap().to_be_bytes();
             Object(ObjectKind::Integer, self.register(&bytes))
         }
     }
@@ -56,6 +67,24 @@ impl Program {
         let bytes = number.to_be_bytes();
         Object(ObjectKind::Float, self.register(&bytes))
     }
+    pub fn register_objects(&mut self, objects: &[Object]) -> &'static [Object] {
+        let saved_bytes = self.arena.alloc_slice(objects);
+        let saved_bytes: &'static [Object] = unsafe { &*(saved_bytes as *const [Object]) };
+        saved_bytes
+    }
+
+    pub fn register_objects_as_u8(&mut self, objects: &[Object]) -> &'static [u8] {
+        unsafe {
+            let objs: &[u8] = std::mem::transmute(objects);
+            let mem = self
+                .arena
+                .alloc_raw(std::alloc::Layout::for_value::<[u8]>(objs))
+                as *mut &[u8];
+            mem.copy_from_nonoverlapping(&objs, objs.len());
+            let _ = std::slice::from_raw_parts_mut(mem, objs.len());
+            return &*(objs as *const [u8]);
+        }
+    }
 
     pub fn register(&mut self, byte_str: &[u8]) -> &'static [u8] {
         let byte_str: &[u8] = self.arena.alloc_slice(byte_str);
@@ -63,11 +92,18 @@ impl Program {
         return byte_str;
     }
 
+    pub fn get_memo(&self, key: MemoKey) -> Option<&Object> {
+        self.memos.get(&key)
+    }
+    pub fn set_memo(&mut self, key: MemoKey, result: Object) {
+        self.memos.insert(key, result);
+    }
     pub fn from_string(text: String) -> Self {
         let mut program = Program {
             arena: Default::default(),
             instructions: vec![],
             funcs: BTreeMap::new(),
+            memos: HashMap::new(),
         };
 
         for line in text.split('\n') {
@@ -78,11 +114,23 @@ impl Program {
             let op = line_spl[0];
             assert!(Operation::exists(op), "{} not a valid operation", op);
 
+            if op == "func" {
+                let mut saved_name = program.register_string(line_spl[1]);
+                let arity = line_spl[2]
+                    .parse::<usize>()
+                    .expect("arity is not a number or something");
+                saved_name.0 = ObjectKind::Func;
+                let idx = program.instructions.len();
+                program.funcs.insert(saved_name, (idx, arity));
+            }
+
             let arg = line_spl[1..].join(" ");
 
-            let saved_arg = if !arg.is_empty() {
+            let saved_arg: Option<Object> = if !arg.is_empty() {
                 if arg.chars().all(|c| c.is_digit(10) || c == '.') {
                     Some(program.register_as_a_number(arg.as_str()))
+                } else if arg.starts_with('[') && arg.ends_with(']') {
+                    todo!("pushing many literals at once");
                 } else {
                     Some(program.register_string(arg.as_str()))
                 }
@@ -90,11 +138,14 @@ impl Program {
                 None
             };
 
-            if op == "func" {
-                let idx = program.instructions.len();
-                let mut func = saved_arg.unwrap().clone();
-                func.0 = ObjectKind::Func;
-                program.funcs.insert(func, idx);
+            if op == "call" {
+                let mut key = saved_arg.unwrap();
+                key.0 = ObjectKind::Func;
+
+                let op_code = Operation::get_opcode(op);
+                program
+                    .instructions
+                    .push(Operation::new(op_code, Some(key)))
             } else {
                 let op_code = Operation::get_opcode(op);
                 program
@@ -106,151 +157,71 @@ impl Program {
         return program;
     }
 
-    pub fn get_func(&self, lbl: &Object) -> Option<&Index> {
+    pub fn get_func(&self, lbl: &Object) -> Option<&(Index, Arity)> {
         self.funcs.get(lbl)
     }
 
     pub fn handle_bin_op(&mut self, kind: BinOpKind, lhs: Object, rhs: Object) -> Object {
         match (kind, lhs.0, rhs.0) {
             (BinOpKind::Add, ObjectKind::Integer, ObjectKind::Integer) => {
-                let lbytes: [u8; 8] = array::from_fn(|i| lhs.1[i]);
-                let left = i64::from_be_bytes(lbytes);
-                let rbytes: [u8; 8] = array::from_fn(|i| rhs.1[i]);
-                let right = i64::from_be_bytes(rbytes);
-                self.register_integer(left + right)
+                self.register_integer(lhs.integer() + rhs.integer())
             }
             (BinOpKind::Add, ObjectKind::Float, ObjectKind::Float) => {
-                let lbytes: [u8; 8] = array::from_fn(|i| lhs.1[i]);
-                let left = f64::from_be_bytes(lbytes);
-                let rbytes: [u8; 8] = array::from_fn(|i| rhs.1[i]);
-                let right = f64::from_be_bytes(rbytes);
-                self.register_float(left + right)
+                self.register_float(lhs.float() + rhs.float())
             }
             (BinOpKind::Sub, ObjectKind::Integer, ObjectKind::Integer) => {
-                let lbytes: [u8; 8] = array::from_fn(|i| lhs.1[i]);
-                let left = i64::from_be_bytes(lbytes);
-                let rbytes: [u8; 8] = array::from_fn(|i| rhs.1[i]);
-                let right = i64::from_be_bytes(rbytes);
-                self.register_integer(left - right)
+                self.register_integer(lhs.integer() - rhs.integer())
             }
             (BinOpKind::Sub, ObjectKind::Float, ObjectKind::Float) => {
-                let lbytes: [u8; 8] = array::from_fn(|i| lhs.1[i]);
-                let left = f64::from_be_bytes(lbytes);
-                let rbytes: [u8; 8] = array::from_fn(|i| rhs.1[i]);
-                let right = f64::from_be_bytes(rbytes);
-                self.register_float(left - right)
+                self.register_float(lhs.float() - rhs.float())
             }
             (BinOpKind::Mul, ObjectKind::Integer, ObjectKind::Integer) => {
-                let lbytes: [u8; 8] = array::from_fn(|i| lhs.1[i]);
-                let left = i64::from_be_bytes(lbytes);
-                let rbytes: [u8; 8] = array::from_fn(|i| rhs.1[i]);
-                let right = i64::from_be_bytes(rbytes);
-                self.register_integer(left * right)
+                self.register_integer(lhs.integer() * rhs.integer())
             }
             (BinOpKind::Mul, ObjectKind::Float, ObjectKind::Float) => {
-                let lbytes: [u8; 8] = array::from_fn(|i| lhs.1[i]);
-                let left = f64::from_be_bytes(lbytes);
-                let rbytes: [u8; 8] = array::from_fn(|i| rhs.1[i]);
-                let right = f64::from_be_bytes(rbytes);
-                self.register_float(left * right)
+                self.register_float(lhs.float() * rhs.float())
             }
             (BinOpKind::Div, ObjectKind::Integer, ObjectKind::Integer) => {
-                let lbytes: [u8; 8] = array::from_fn(|i| lhs.1[i]);
-                let left = i64::from_be_bytes(lbytes);
-                let rbytes: [u8; 8] = array::from_fn(|i| rhs.1[i]);
-                let right = i64::from_be_bytes(rbytes);
-                self.register_integer(left / right)
+                self.register_integer(lhs.integer() / rhs.integer())
             }
             (BinOpKind::Div, ObjectKind::Float, ObjectKind::Float) => {
-                let lbytes: [u8; 8] = array::from_fn(|i| lhs.1[i]);
-                let left = f64::from_be_bytes(lbytes);
-                let rbytes: [u8; 8] = array::from_fn(|i| rhs.1[i]);
-                let right = f64::from_be_bytes(rbytes);
-                self.register_float(left / right)
+                self.register_float(lhs.float() / rhs.float())
             }
             (BinOpKind::Eq, ObjectKind::Integer, ObjectKind::Integer) => {
-                let lbytes: [u8; 8] = array::from_fn(|i| lhs.1[i]);
-                let left = i64::from_be_bytes(lbytes);
-                let rbytes: [u8; 8] = array::from_fn(|i| rhs.1[i]);
-                let right = i64::from_be_bytes(rbytes);
-                self.register_bool(left == right)
+                self.register_bool(lhs.integer() == rhs.integer())
             }
             (BinOpKind::Eq, ObjectKind::Float, ObjectKind::Float) => {
-                let lbytes: [u8; 8] = array::from_fn(|i| lhs.1[i]);
-                let left = f64::from_be_bytes(lbytes);
-                let rbytes: [u8; 8] = array::from_fn(|i| rhs.1[i]);
-                let right = f64::from_be_bytes(rbytes);
-                self.register_bool(left == right)
+                self.register_bool(lhs.float() == rhs.float())
             }
             (BinOpKind::LessEq, ObjectKind::Integer, ObjectKind::Integer) => {
-                let lbytes: [u8; 8] = array::from_fn(|i| lhs.1[i]);
-                let left = i64::from_be_bytes(lbytes);
-                let rbytes: [u8; 8] = array::from_fn(|i| rhs.1[i]);
-                let right = i64::from_be_bytes(rbytes);
-                self.register_bool(left <= right)
+                self.register_bool(lhs.integer() <= rhs.integer())
             }
             (BinOpKind::LessEq, ObjectKind::Float, ObjectKind::Float) => {
-                let lbytes: [u8; 8] = array::from_fn(|i| lhs.1[i]);
-                let left = f64::from_be_bytes(lbytes);
-                let rbytes: [u8; 8] = array::from_fn(|i| rhs.1[i]);
-                let right = f64::from_be_bytes(rbytes);
-                self.register_bool(left <= right)
+                self.register_bool(lhs.float() <= rhs.float())
             }
             (BinOpKind::Lesser, ObjectKind::Integer, ObjectKind::Integer) => {
-                let lbytes: [u8; 8] = array::from_fn(|i| lhs.1[i]);
-                let left = i64::from_be_bytes(lbytes);
-                let rbytes: [u8; 8] = array::from_fn(|i| rhs.1[i]);
-                let right = i64::from_be_bytes(rbytes);
-                self.register_bool(left < right)
+                self.register_bool(lhs.integer() < rhs.integer())
             }
             (BinOpKind::Lesser, ObjectKind::Float, ObjectKind::Float) => {
-                let lbytes: [u8; 8] = array::from_fn(|i| lhs.1[i]);
-                let left = f64::from_be_bytes(lbytes);
-                let rbytes: [u8; 8] = array::from_fn(|i| rhs.1[i]);
-                let right = f64::from_be_bytes(rbytes);
-                self.register_bool(left < right)
+                self.register_bool(lhs.float() < rhs.float())
             }
             (BinOpKind::GreatEq, ObjectKind::Integer, ObjectKind::Integer) => {
-                let lbytes: [u8; 8] = array::from_fn(|i| lhs.1[i]);
-                let left = i64::from_be_bytes(lbytes);
-                let rbytes: [u8; 8] = array::from_fn(|i| rhs.1[i]);
-                let right = i64::from_be_bytes(rbytes);
-                self.register_bool(left >= right)
+                self.register_bool(lhs.integer() >= rhs.integer())
             }
             (BinOpKind::GreatEq, ObjectKind::Float, ObjectKind::Float) => {
-                let lbytes: [u8; 8] = array::from_fn(|i| lhs.1[i]);
-                let left = f64::from_be_bytes(lbytes);
-                let rbytes: [u8; 8] = array::from_fn(|i| rhs.1[i]);
-                let right = f64::from_be_bytes(rbytes);
-                self.register_bool(left >= right)
+                self.register_bool(lhs.float() >= rhs.float())
             }
             (BinOpKind::Greater, ObjectKind::Integer, ObjectKind::Integer) => {
-                let lbytes: [u8; 8] = array::from_fn(|i| lhs.1[i]);
-                let left = i64::from_be_bytes(lbytes);
-                let rbytes: [u8; 8] = array::from_fn(|i| rhs.1[i]);
-                let right = i64::from_be_bytes(rbytes);
-                self.register_bool(left > right)
+                self.register_bool(lhs.integer() > rhs.integer())
             }
             (BinOpKind::Greater, ObjectKind::Float, ObjectKind::Float) => {
-                let lbytes: [u8; 8] = array::from_fn(|i| lhs.1[i]);
-                let left = f64::from_be_bytes(lbytes);
-                let rbytes: [u8; 8] = array::from_fn(|i| rhs.1[i]);
-                let right = f64::from_be_bytes(rbytes);
-                self.register_bool(left > right)
+                self.register_bool(lhs.float() > rhs.float())
             }
             (BinOpKind::Mod, ObjectKind::Integer, ObjectKind::Integer) => {
-                let lbytes: [u8; 8] = array::from_fn(|i| lhs.1[i]);
-                let left = i64::from_be_bytes(lbytes);
-                let rbytes: [u8; 8] = array::from_fn(|i| rhs.1[i]);
-                let right = i64::from_be_bytes(rbytes);
-                self.register_integer(left % right)
+                self.register_integer(lhs.integer() % rhs.integer())
             }
             (BinOpKind::Mod, ObjectKind::Float, ObjectKind::Float) => {
-                let lbytes: [u8; 8] = array::from_fn(|i| lhs.1[i]);
-                let left = f64::from_be_bytes(lbytes);
-                let rbytes: [u8; 8] = array::from_fn(|i| rhs.1[i]);
-                let right = f64::from_be_bytes(rbytes);
-                self.register_float(left % right)
+                self.register_float(lhs.float() % rhs.float())
             }
             _ => todo!("{:?}\n\tleft:{:?}\n\tright:{:?}", kind, lhs.0, rhs.0),
         }
