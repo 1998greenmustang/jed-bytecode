@@ -139,25 +139,28 @@ impl Operation {
                     .get_func(func)
                     .cloned()
                     .unwrap_or_else(|| panic!("invalid function"));
-                if arity > 0 {
-                    let args = unsafe {
-                        vm.obj_stack
-                            .last_n((arity).try_into().expect("i dont know the error message"))
-                    };
-                    let args = vm.program.register_objects(args);
-                    match vm.program.get_memo((func_ptr, args)) {
-                        Some(value) => {
-                            // println!("YES DUDE {:?}", args);
-                            unsafe { vm.obj_stack.pop_n(arity) };
-                            vm.obj_stack.push(*value);
-                        }
-                        None => {
-                            vm.call_stack.push(Frame::new(vm.counter, FrameKind::Call));
-                            let current_frame = vm.call_stack.last_mut();
-                            let args = vm.program.register_objects(args);
-                            current_frame.memo_key = (func_ptr, args);
-                            vm.jump(&func);
-                        }
+                let args = if arity > 0 {
+                    vm.program
+                        .register_objects(unsafe { vm.obj_stack.last_n(arity) })
+                } else {
+                    &[]
+                };
+                match vm.program.get_memo((func_ptr, args)) {
+                    Some(value) => {
+                        // println!("YES DUDE {:?}", args);
+                        unsafe { vm.obj_stack.pop_n(arity) };
+                        vm.obj_stack.push(*value);
+                    }
+                    None => {
+                        vm.call_stack.push(Frame::new(vm.counter, FrameKind::Call));
+                        let current_frame = vm.call_stack.last_mut();
+                        let args = if args.len() > 0 {
+                            vm.program.register_objects(args)
+                        } else {
+                            args
+                        };
+                        current_frame.memo_key = (func_ptr, args);
+                        vm.jump(&func);
                     }
                 }
             }
