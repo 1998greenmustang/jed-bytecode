@@ -18,66 +18,33 @@ use vm::VM;
 fn main() {
     let mut vm = VM::from_string(
         "
-            
 func fib 1
 	store_name n
-
-	push_lit 0
-	store_name a
 	
+	push_name n
 	push_lit 1
-	store_name b
+	bin_op <=
+	return_if n
+	
+	push_name n
+	push_lit 2
+	bin_op -
+	call fib
 
 	push_name n
-	do_for
-		push_name b
-		store_name a
-
-		push_name a
-		push_name b
-		bin_op +
-		store_name b
-	done
-
-	push_name a
-done
+	push_lit 1
+	bin_op -
+	call fib
 	
-		
+	bin_op +
 done
 
 func main 0
-	push_lit 0
-	push_lit 1
-	push_lit 2
-	push_lit 3
-	push_lit 4
-	create_list 5
-	store_name nums
-
-	push_lit 0
-	store_name i
-	push_lit 5
-	do_for
-		push_name nums
-		push_name i
-		list_get
-		call fib
-
-		push_name nums
-		push_name i
-		list_set
-			
-		push_name nums
-		push_name i
-		push_lit 1
-		bin_op +
-		store_name i
-	done
-
-	push_name nums
+	push_lit 92
+	call fib
 	call_builtin println
 exit
-        "
+       "
         .to_owned(),
     );
 

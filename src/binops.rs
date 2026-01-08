@@ -14,6 +14,8 @@ pub enum BinOpKind {
     GreatEq,
     Lesser,
     Greater,
+    And,
+    Or,
 }
 
 impl BinOpKind {
@@ -29,6 +31,8 @@ impl BinOpKind {
             val if val.1 == b"<" => BinOpKind::Lesser,
             val if val.1 == b">" => BinOpKind::Greater,
             val if val.1 == b"%" => BinOpKind::Mod,
+            val if val.1 == b"&&" => BinOpKind::And,
+            val if val.1 == b"||" => BinOpKind::Or,
             _ => panic!("Not implemented: {:?}", arg),
         }
     }

@@ -14,7 +14,15 @@ impl BuiltIn {
     }
     pub fn call_with_slice(&self, slice: &[Object]) {
         match self {
-            BuiltIn::PrintLn => println!("{slice:?}"),
+            BuiltIn::PrintLn => {
+                let (last, rest) = slice.split_last().unwrap();
+                let mut output = "[".to_owned();
+                for obj in rest {
+                    output += &std::format!("{obj},");
+                }
+                output += &std::format!("{last}]");
+                println!("{output}");
+            }
         }
     }
 }

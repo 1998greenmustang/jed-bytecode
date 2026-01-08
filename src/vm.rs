@@ -1,7 +1,9 @@
+use std::collections::HashMap;
+
 use crate::{
     binops::BinOpKind,
     frame::{Frame, FrameKind},
-    indexmap::IndexMap,
+    indexmap::{IndexMap, IndexSet},
     mutable::MutableObject,
     object::{Object, ObjectKind},
     operation::Operation,
@@ -11,6 +13,7 @@ use crate::{
 
 pub struct VM {
     pub program: Program,
+    pub consts: HashMap<Object, Object>,
     pub counter: usize,
     pub call_stack: Stack<Frame>,
     pub heap: IndexMap<MutableObject>,
@@ -27,10 +30,19 @@ impl VM {
             call_stack,
             counter: program.get_main(),
             program,
+            consts: HashMap::new(),
             heap: IndexMap::new(),
             obj_stack: Stack::new(),
             temp: None,
         }
+    }
+
+    pub fn store_const(&mut self, name: Object, obj: Object) {
+        self.consts.insert(name, obj);
+    }
+
+    pub fn get_const(&self, name: &Object) -> &Object {
+        self.consts.get(name).unwrap()
     }
 
     pub fn create_list(&mut self, n: usize) -> usize {
@@ -77,13 +89,13 @@ impl VM {
                 }
             }
             let op = self.next();
-            println!(
-                "op: {:?}, pc: {}, tmp: {:?}, objstack: {:?}",
-                op.unwrap(),
-                self.counter,
-                self.temp,
-                self.obj_stack
-            );
+            // println!(
+            // "op: {:?}, pc: {}, tmp: {:?}, objstack: {:?}",
+            // op.unwrap(),
+            // self.counter,
+            // self.temp,
+            // self.obj_stack
+            // );
             op.unwrap().call(self);
             if let Operation::Exit = self.program.get_op(self.counter) {
                 self.counter = self.program.get_main();

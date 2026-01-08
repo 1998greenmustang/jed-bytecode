@@ -24,12 +24,15 @@ pub enum Operation {
     StoreTemp,
     Func(Object, u8),
     Done,
+    Exit,
     DoFor,
+    DoForIn(Object),
     CreateList(Object),
     ListPush(Object),
     ListGet,
     ListSet,
-    Exit,
+    PushRange,
+    ReturnIfConst(Object),
 }
 
 impl Operation {
@@ -50,10 +53,13 @@ impl Operation {
             "done" => true,
             "exit" => true,
             "do_for" => true,
+            "do_for_in" => true,
             "create_list" => true,
             "list_push" => true,
             "list_get" => true,
             "list_set" => true,
+            "push_range" => true,
+            "return_if_const" => true,
             _ => false,
         }
     }
@@ -75,10 +81,13 @@ impl Operation {
             "done" => 13,
             "exit" => 14,
             "do_for" => 15,
-            "create_list" => 16,
-            "list_push" => 17,
-            "list_get" => 18,
-            "list_set" => 19,
+            "do_for_in" => 16,
+            "create_list" => 17,
+            "list_push" => 18,
+            "list_get" => 19,
+            "list_set" => 20,
+            "push_range" => 21,
+            "return_if_const" => 22,
             _ => 0,
         }
     }
@@ -110,10 +119,13 @@ impl Operation {
             13 => Operation::Done,
             14 => Operation::Exit,
             15 => Operation::DoFor,
-            16 => Operation::CreateList(arg.unwrap_or_else(|| Self::arg_error())),
-            17 => Operation::ListPush(arg.unwrap_or_else(|| Self::arg_error())),
-            18 => Operation::ListGet,
-            19 => Operation::ListSet,
+            16 => Operation::DoForIn(arg.unwrap_or_else(|| Self::arg_error())),
+            17 => Operation::CreateList(arg.unwrap_or_else(|| Self::arg_error())),
+            18 => Operation::ListPush(arg.unwrap_or_else(|| Self::arg_error())),
+            19 => Operation::ListGet,
+            20 => Operation::ListSet,
+            21 => Operation::PushRange,
+            22 => Operation::ReturnIfConst(arg.unwrap_or_else(|| Self::arg_error())),
             _ => panic!("Invalid operation: '{:?}' '{:?}'", op, arg),
         }
     }
@@ -161,7 +173,7 @@ impl Operation {
                         .unwrap_or_else(|| panic!("No such variable '{:?}'", name)),
                 );
 
-                println!("pushing {name}: {item}");
+                // println!("pushing {name}: {item}");
             }
             Operation::PushTemp => {
                 let tmp = vm
@@ -192,7 +204,10 @@ impl Operation {
                     _ => unreachable!(),
                 }
             }
-            Operation::StoreConst(_) => todo!(),
+            Operation::StoreConst(name) => {
+                let obj = vm.obj_stack.pop();
+                vm.store_const(*name, obj);
+            }
             Operation::StoreName(name) => {
                 let frame = vm.call_stack.last_mut();
                 frame.add_local(*name, vm.obj_stack.pop());
@@ -204,27 +219,32 @@ impl Operation {
             Operation::Func(_, _) => {}
             Operation::Done => {
                 let frame = vm.call_stack.pop();
-                println!("{frame:?}");
-                if FrameKind::Call == frame.kind {
-                    let return_value = *vm.obj_stack.last_option().unwrap_or(&Object::dummy());
-                    vm.program.set_memo(frame.memo_key, return_value);
-                }
-                if FrameKind::Loop == frame.kind {
-                    let next_frame = vm.call_stack.last_mut_option();
-                    if let Some(nxt) = next_frame {
-                        println!("{nxt:?}\n{frame:?}");
-                        if nxt.return_address == frame.return_address {
-                            nxt.copy_locals(&frame);
-                        } else {
-                            println!("YES DUDE !!! {}", vm.counter);
-                            vm.counter = vm.counter + 1;
-                            return;
+                match frame.kind {
+                    FrameKind::Call => {
+                        let return_value = *vm.obj_stack.last_option().unwrap_or(&Object::dummy());
+                        vm.program.set_memo(frame.memo_key, return_value);
+                        vm.counter = frame.return_address;
+                    }
+                    FrameKind::Loop => {
+                        let next_frame = vm.call_stack.last_mut_option();
+                        if let Some(nxt) = next_frame {
+                            // println!("{nxt:?}\n{frame:?}");
+                            if nxt.return_address == frame.return_address {
+                                // println!("YES DUDE !!! {}", vm.counter);
+                                nxt.copy_locals(&frame);
+                                vm.counter = frame.return_address;
+                            } else {
+                                // println!("YES DUDE !!! {}", vm.counter);
+                                vm.counter = vm.counter + 1;
+                                return;
+                            }
                         }
                     }
+                    FrameKind::Main => todo!(),
                 }
             }
             Operation::Exit => {
-                println!("i have been called");
+                // println!("i have been called");
                 std::process::exit(0);
             }
             Operation::CallBuiltIn(built_in) => {
@@ -247,7 +267,26 @@ impl Operation {
                 // TODO let done work with this
                 let times = vm.obj_stack.pop().integer();
                 let pc = vm.counter.clone();
-                for _ in 0..times - 1 {
+                for _ in 0..times {
+                    let mut frame = Frame::new(pc, FrameKind::Loop);
+                    frame.copy_locals(vm.call_stack.last());
+                    vm.call_stack.push(frame);
+                }
+            }
+            Operation::DoForIn(obj_name) => {
+                let current_frame = vm.call_stack.last();
+                let maybe_obj_ptr = current_frame.get_local(obj_name);
+                let pointer = match maybe_obj_ptr {
+                    Some(pointer) => pointer,
+                    None => panic!("No such name '{}'", obj_name),
+                };
+                let obj = vm.heap.get(&pointer.pointer());
+                let times = match obj {
+                    Some(MutableObject::List(l)) => l.len(),
+                    _ => panic!("Not a list"),
+                };
+                let pc = vm.counter.clone();
+                for _ in 0..times {
                     let mut frame = Frame::new(pc, FrameKind::Loop);
                     frame.copy_locals(vm.call_stack.last());
                     vm.call_stack.push(frame);
@@ -292,7 +331,7 @@ impl Operation {
                     .heap
                     .get(&list_ptr)
                     .unwrap_or_else(|| panic!("no object there"));
-                println!("{list_ptr} {index}");
+                // println!("{list_ptr} {index}");
                 if let MutableObject::List(l) = list {
                     let item_ptr: Object = *l
                         .get(index as usize)
@@ -302,7 +341,7 @@ impl Operation {
                         .get(&item_ptr.pointer())
                         .unwrap_or_else(|| panic!("nothing there bro"));
                     vm.obj_stack.push(item.into());
-                    println!("{item:?}")
+                    // println!("{item:?}")
                 }
             }
             Operation::ListSet => {
@@ -312,13 +351,14 @@ impl Operation {
 
                 let obj_ptr = vm.heap.push(obj.into());
 
-                println!("set: {index} {list_ptr} {obj_ptr}");
+                // println!("set: {index} {list_ptr} {obj} @ {obj_ptr}");
                 let list = vm
                     .heap
                     .get_mut(&list_ptr)
                     .unwrap_or_else(|| panic!("no object there"));
                 if let MutableObject::List(l) = list {
                     let mut l_vec = l.to_vec();
+                    l_vec.remove(index);
                     let _ = l_vec.insert(
                         index,
                         Object(
@@ -326,6 +366,34 @@ impl Operation {
                             vm.program.register(&obj_ptr.to_be_bytes()),
                         ),
                     );
+
+                    let registered = vm.program.register_objects(&l_vec);
+                    vm.heap.insert(list_ptr, MutableObject::List(registered));
+                }
+            }
+            Operation::PushRange => {
+                let steps = vm.obj_stack.pop();
+                let end = vm.obj_stack.pop();
+                let start = vm.obj_stack.pop();
+                println!("range: {start}..{end} by {steps}");
+                for i in (start.integer()..end.integer()).step_by(steps.pointer()) {
+                    vm.obj_stack.push(vm.program.register_integer(i));
+                }
+            }
+            Operation::ReturnIfConst(name) => {
+                let b = vm.obj_stack.pop();
+                assert_eq!(b.0, ObjectKind::Bool, "Object is not a boolean");
+                let bol: &str = unsafe { std::mem::transmute(b.1) };
+                match bol {
+                    "true" => {
+                        let frame = vm.call_stack.pop();
+                        vm.obj_stack.push(*vm.get_const(name));
+                        vm.counter = frame.return_address;
+                        let return_value = *vm.obj_stack.last_option().unwrap_or(&Object::dummy());
+                        vm.program.set_memo(frame.memo_key, return_value);
+                    }
+                    "false" => return,
+                    _ => unreachable!(),
                 }
             }
         }

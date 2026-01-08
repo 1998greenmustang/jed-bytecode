@@ -223,6 +223,12 @@ impl Program {
             (BinOpKind::Mod, ObjectKind::Float, ObjectKind::Float) => {
                 self.register_float(lhs.float() % rhs.float())
             }
+            (BinOpKind::And, ObjectKind::Bool, ObjectKind::Bool) => {
+                self.register_bool(lhs.bool() && rhs.bool())
+            }
+            (BinOpKind::Or, ObjectKind::Bool, ObjectKind::Bool) => {
+                self.register_bool(lhs.bool() || rhs.bool())
+            }
             _ => todo!("{:?}\n\tleft:{:?}\n\tright:{:?}", kind, lhs.0, rhs.0),
         }
     }

@@ -71,6 +71,18 @@ impl Object {
         }
     }
 
+    pub fn bool(&self) -> bool {
+        if self.0 == ObjectKind::Bool {
+            match unsafe { String::from_utf8_unchecked(self.1.to_vec()) }.as_str() {
+                "true" => true,
+                "false" => false,
+                _ => unreachable!(),
+            }
+        } else {
+            panic!("Not a bool.");
+        }
+    }
+
     pub fn as_bytes(self) -> Vec<u8> {
         let key: u8 = self.0 as u8;
         let mut data = self.1.to_vec();
