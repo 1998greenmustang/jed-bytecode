@@ -1,4 +1,4 @@
-func fib
+func fib 1
 	store_name n
 	
 	push_name n
@@ -19,7 +19,7 @@ func fib
 	bin_op +
 done
 
-func main
+func main 0
 	push_lit 5
 	call fib
 	call_builtin println

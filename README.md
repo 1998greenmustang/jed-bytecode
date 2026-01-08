@@ -13,7 +13,7 @@ Then use `cargo run` or `cargo build --release` for a more optimized version.
 
 ### Hello World in Jed Bytecode
 ```text
-func main
+func main 0
   push_lit "Hello world!"
   call_builtin println
 done
@@ -71,8 +71,8 @@ There are 2 truly internal types: `Func` and `MutablePtr`. `Func` is essentially
 | Operation | Description | Argument | Stack Arguments |
 | --- | --- | --- | --- |
 | bin_op       | Apply a binary operation on the top 2 | BinOp | 2 same-typed operands |
-| call         | Call a custom defined function        | Function name | Arguments required of the function |
-| call_builtin | Call a builtin function (ie println)  | Function name | Arguments required of the function |
+| call         | Call a custom defined function        | Function name | Arguments (or not!) required of the function |
+| call_builtin | Call a builtin function (ie println)  | Function name | Arguments (or not!) required of the function |
 | push_lit     | Push a literal to the stack           | Literal | - |
 | push_name    | Push a stored local to the stack      | Variable name | - |
 | push_temp    | Push the `temp` storage to the stack  | - | - |
