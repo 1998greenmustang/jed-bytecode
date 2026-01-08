@@ -10,15 +10,12 @@ func fib
 	push_lit 2
 	bin_op -
 	call fib
-	store_temp
-	
 
 	push_name n
 	push_lit 1
 	bin_op -
 	call fib
 	
-	push_temp
 	bin_op +
 done
 
