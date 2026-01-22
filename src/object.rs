@@ -1,6 +1,10 @@
-use std::{convert::TryFrom, fmt::Display, u8};
+use std::{
+    convert::TryFrom,
+    fmt::{Debug, Display},
+    u8,
+};
 
-use crate::mutable::MutableObject;
+use crate::utils;
 
 #[derive(PartialEq, Debug)]
 // pub enum Object<'a> {
@@ -15,8 +19,9 @@ pub enum ObjectKind {
     String,
     Bool,
     Func,
-    MutablePtr,
+    Pointer,
     Nil,
+    List,
 }
 
 impl TryFrom<&u8> for ObjectKind {
@@ -32,102 +37,125 @@ impl TryFrom<&u8> for ObjectKind {
 }
 
 #[derive(Hash, PartialEq, Eq, Debug, Copy, Clone, PartialOrd, Ord)]
-pub struct Object(pub ObjectKind, pub &'static [u8]);
+pub struct Object {
+    pub kind: ObjectKind,
+    pub data: ObjectData,
+}
 
-impl Object {
-    pub fn dummy() -> Object {
-        Object(ObjectKind::Nil, &[])
-    }
-
-    pub fn pointer(&self) -> usize {
-        if self.0 == ObjectKind::MutablePtr || self.0 == ObjectKind::Integer {
-            usize::from_be_bytes(std::array::from_fn(|i| self.1[i]))
-        } else {
-            panic!("Not a pointer.")
-        }
-    }
-
-    pub fn string(&self) -> String {
-        if self.0 == ObjectKind::String {
-            unsafe { String::from_utf8_unchecked(self.1.to_vec()) }
-        } else {
-            panic!("Not a string.");
-        }
-    }
-
-    pub fn integer(&self) -> i64 {
-        if self.0 == ObjectKind::Integer {
-            i64::from_be_bytes(std::array::from_fn(|i| self.1[i]))
-        } else {
-            panic!("Not a integer.");
-        }
-    }
-
-    pub fn float(&self) -> f64 {
-        if self.0 == ObjectKind::Float {
-            f64::from_be_bytes(std::array::from_fn(|i| self.1[i]))
-        } else {
-            panic!("Not a float.");
-        }
-    }
-
-    pub fn bool(&self) -> bool {
-        if self.0 == ObjectKind::Bool {
-            match unsafe { String::from_utf8_unchecked(self.1.to_vec()) }.as_str() {
-                "true" => true,
-                "false" => false,
-                _ => unreachable!(),
-            }
-        } else {
-            panic!("Not a bool.");
-        }
-    }
-
-    pub fn as_bytes(self) -> Vec<u8> {
-        let key: u8 = self.0 as u8;
-        let mut data = self.1.to_vec();
-        data.insert(0, key);
-        return data;
-    }
+#[derive(Hash, PartialEq, Eq, Copy, Clone, PartialOrd, Ord)]
+pub enum ObjectData {
+    Integer(isize),
+    Float(isize, usize),
+    UnsignedInt(usize),
+    String(&'static [u8]),
+    Bool(bool),
+    Func(&'static [u8]),
+    List(*const Object, usize), // start, end
+    Pointer(*mut &'static Object),
+    Nil,
 }
 
 impl Display for Object {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self.0 {
-            ObjectKind::Integer => write!(f, "{}", {
-                assert!(self.0 == ObjectKind::Integer, "Not a integer!");
-                let bytes: [u8; 8] = std::array::from_fn(|i| self.1[i]);
-                i64::from_be_bytes(bytes)
-            }),
-            ObjectKind::Float => write!(f, "{}", {
-                assert!(self.0 == ObjectKind::Float, "Not a float!");
-                let bytes: [u8; 8] = std::array::from_fn(|i| self.1[i]);
-                f64::from_be_bytes(bytes)
-            }),
-            ObjectKind::String => write!(f, "{}", unsafe {
-                std::mem::transmute::<&'static [u8], &str>(self.1)
-            }),
-            ObjectKind::Bool => write!(f, "{}", unsafe {
-                match std::mem::transmute::<&'static [u8], &str>(self.1) {
-                    "true" => true,
-                    "false" => false,
-                    _ => unreachable!("Nice memory!"),
-                }
-            }),
-            ObjectKind::Func => write!(f, "<func {}>", self.string()),
-            ObjectKind::Nil => write!(f, "Nil"),
-            ObjectKind::MutablePtr => write!(f, "<ptr @{}>", self.pointer()),
+        write!(f, "{}", self.data)
+    }
+}
 
-            _ => todo!(),
+impl Debug for ObjectData {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ObjectData::Integer(i) => write!(f, "int ({i})"),
+            ObjectData::Float(i, p) => write!(f, "float ({i}.{p})"),
+            ObjectData::UnsignedInt(u) => write!(f, "uint ({u})"),
+            ObjectData::String(items) => {
+                write!(f, "string (\"{}\")", utils::bytes_to_string(items))
+            }
+            ObjectData::Bool(b) => write!(f, "bool ({b:?})"),
+            ObjectData::Func(items) => write!(f, "func ({})", utils::bytes_to_string(items)),
+            ObjectData::Pointer(pr) => write!(f, "ptr ({pr:p})"),
+            ObjectData::Nil => write!(f, "Nil"),
+            ObjectData::List(start, len) => todo!(),
         }
     }
 }
 
-impl From<&MutableObject> for Object {
-    fn from(value: &MutableObject) -> Self {
-        match value {
-            MutableObject::Object(object) => *object,
-            _ => unreachable!(),
+impl Display for ObjectData {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ObjectData::Integer(i) => write!(f, "{i}"),
+            ObjectData::Float(i, p) => write!(f, "{i}.{p}"),
+            ObjectData::String(s) => write!(f, "{}", utils::bytes_to_string(s)),
+            ObjectData::Bool(b) => write!(f, "{b}"),
+            ObjectData::Func(n) => write!(f, "{}", utils::bytes_to_string(n)),
+            ObjectData::Pointer(pr) => write!(f, "{pr:p}"),
+            ObjectData::Nil => write!(f, "Nil"),
+            ObjectData::UnsignedInt(_) => todo!(),
+            ObjectData::List(start, len) => unsafe {
+                write!(f, "[")?;
+                for idx in 0..*len {
+                    let addr = start.add(idx);
+                    write!(f, "{}", (addr as *const Object).read())?;
+
+                    if idx < len - 1 {
+                        write!(f, ",")?
+                    }
+                }
+                write!(f, "]")
+            },
+        }
+    }
+}
+
+impl Display for ObjectKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ObjectKind::Integer => write!(f, "Integer"),
+            ObjectKind::Float => write!(f, "Float"),
+            ObjectKind::String => write!(f, "String"),
+            ObjectKind::Bool => write!(f, "Bool"),
+            ObjectKind::Func => write!(f, "Func"),
+            ObjectKind::Pointer => write!(f, "Pointer"),
+            ObjectKind::Nil => write!(f, "Nil"),
+            ObjectKind::List => write!(f, "List"),
+        }
+    }
+}
+
+impl Object {
+    pub fn nil() -> Self {
+        Self {
+            kind: ObjectKind::Nil,
+            data: ObjectData::Nil,
+        }
+    }
+    pub fn as_tuple(&self) -> (ObjectKind, ObjectData) {
+        return (self.kind, self.data);
+    }
+}
+
+impl From<bool> for Object {
+    fn from(value: bool) -> Self {
+        Object {
+            kind: ObjectKind::Bool,
+            data: ObjectData::Bool(value),
+        }
+    }
+}
+
+impl From<isize> for Object {
+    fn from(value: isize) -> Self {
+        Object {
+            kind: ObjectKind::Integer,
+            data: ObjectData::Integer(value),
+        }
+    }
+}
+
+impl From<(isize, usize)> for Object {
+    fn from(value: (isize, usize)) -> Self {
+        Object {
+            kind: ObjectKind::Float,
+            data: ObjectData::Float(value.0, value.1),
         }
     }
 }

@@ -1,38 +1,79 @@
-use std::convert::TryInto;
+use std::{convert::TryInto, fmt::Display};
 
 use crate::{
     binops::BinOpKind,
     builtin::BuiltIn,
+    error::{ProgramError, ProgramErrorKind},
     frame::{Frame, FrameKind},
-    mutable::MutableObject,
-    object::{Object, ObjectKind},
+    object::{Object, ObjectData, ObjectKind},
+    utils::{self, bytes_to_string},
     vm::VM,
 };
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Copy, Clone, Debug)]
+#[repr(usize)]
 pub enum Operation {
     BinOp(BinOpKind),
-    Call(Object),
+    Call(&'static [u8]),
     CallBuiltIn(BuiltIn),
-    PushLit(Object),
-    PushName(Object),
+    PushLit(&'static [u8]),
+    PushName(&'static [u8]),
     PushTemp,
     Pop,
-    ReturnIf(Object),
-    StoreConst(Object),
-    StoreName(Object),
+    ReturnIf(&'static [u8]),
+    StoreConst(&'static [u8]),
+    StoreName(&'static [u8]),
     StoreTemp,
-    Func(Object, u8),
+    Func(&'static [u8], usize),
     Done,
     Exit,
     DoFor,
-    DoForIn(Object),
-    CreateList(Object),
-    ListPush(Object),
-    ListGet,
-    ListSet,
+    DoForIn(&'static [u8]),
+    CreateList(Option<usize>),
+    ListPush(&'static [u8]),
+    ListGet(Option<usize>),
+    ListSet(Option<usize>),
     PushRange,
-    ReturnIfConst(Object),
+    ReturnIfConst(&'static [u8]),
+    Empty,
+}
+
+impl Display for Operation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Operation::BinOp(bin_op_kind) => write!(f, "bin_op {}", bin_op_kind),
+            Operation::Call(items) => write!(f, "call {}", bytes_to_string(items)),
+            Operation::CallBuiltIn(built_in) => write!(f, "call_builtin {}", built_in),
+            Operation::PushLit(items) => write!(f, "push_lit {}", bytes_to_string(items)),
+            Operation::PushName(items) => write!(f, "push_name {}", bytes_to_string(items)),
+            Operation::PushTemp => write!(f, "push_temp"),
+            Operation::Pop => write!(f, "pop"),
+            Operation::ReturnIf(items) => write!(f, "return_if {}", bytes_to_string(items)),
+            Operation::StoreConst(items) => write!(f, "store_const {}", bytes_to_string(items)),
+            Operation::StoreName(items) => write!(f, "store_name {}", bytes_to_string(items)),
+            Operation::StoreTemp => write!(f, "store_temp"),
+            Operation::Func(items, arity) => write!(f, "func {} {arity}", bytes_to_string(items)),
+            Operation::Done => write!(f, "done"),
+            Operation::Exit => write!(f, "exit"),
+            Operation::DoFor => write!(f, "do_for"),
+            Operation::DoForIn(items) => write!(f, "do_for_in {}", bytes_to_string(items)),
+            Operation::CreateList(idx) => {
+                write!(f, "create_list {}", utils::unwrap_as_string_or(*idx, ""))
+            }
+            Operation::ListPush(items) => write!(f, "list_push {}", bytes_to_string(items)),
+            Operation::ListGet(idx) => {
+                write!(f, "list_get {}", utils::unwrap_as_string_or(*idx, ""))
+            }
+            Operation::ListSet(idx) => {
+                write!(f, "list_set {}", utils::unwrap_as_string_or(*idx, ""))
+            }
+            Operation::PushRange => write!(f, "push_range"),
+            Operation::ReturnIfConst(items) => {
+                write!(f, "return_if_const {}", bytes_to_string(items))
+            }
+            Operation::Empty => write!(f, ""),
+        }
+    }
 }
 
 impl Operation {
@@ -92,313 +133,513 @@ impl Operation {
         }
     }
 
-    pub fn arg_error() -> ! {
-        panic!("no arg alert!")
-    }
-
-    pub fn new(op: usize, arg: Option<Object>) -> Self {
-        match op {
-            1 => Operation::BinOp(BinOpKind::from_object(
-                arg.unwrap_or_else(|| Self::arg_error()),
-            )),
-            2 => Operation::Call(arg.unwrap_or_else(|| Self::arg_error())),
-            3 => Operation::CallBuiltIn(BuiltIn::PrintLn), // TODO
-            4 => Operation::PushLit(arg.unwrap_or_else(|| Self::arg_error())),
-            5 => Operation::PushName(arg.unwrap_or_else(|| Self::arg_error())),
-            6 => Operation::PushTemp,
-            7 => Operation::Pop,
-            8 => Operation::ReturnIf(arg.unwrap_or_else(|| Self::arg_error())),
-            9 => Operation::StoreConst(arg.unwrap_or_else(|| Self::arg_error())),
-            10 => Operation::StoreName(arg.unwrap_or_else(|| Self::arg_error())),
-            11 => Operation::StoreTemp,
-            12 => {
-                let argument = arg.unwrap_or_else(|| Self::arg_error());
-                let (arity, func) = argument.1.split_last().unwrap_or_else(|| Self::arg_error());
-                Operation::Func(Object(argument.0, func), *arity)
-            }
-            13 => Operation::Done,
-            14 => Operation::Exit,
-            15 => Operation::DoFor,
-            16 => Operation::DoForIn(arg.unwrap_or_else(|| Self::arg_error())),
-            17 => Operation::CreateList(arg.unwrap_or_else(|| Self::arg_error())),
-            18 => Operation::ListPush(arg.unwrap_or_else(|| Self::arg_error())),
-            19 => Operation::ListGet,
-            20 => Operation::ListSet,
-            21 => Operation::PushRange,
-            22 => Operation::ReturnIfConst(arg.unwrap_or_else(|| Self::arg_error())),
-            _ => panic!("Invalid operation: '{:?}' '{:?}'", op, arg),
-        }
-    }
-
-    pub fn call(&self, vm: &mut VM) {
+    pub fn call(&self, vm: &mut VM) -> Result<(), ProgramError> {
         match self {
-            Operation::BinOp(bin_op_kind) => vm.handle_bin_op(bin_op_kind),
+            Operation::BinOp(bin_op_kind) => vm.handle_bin_op(*bin_op_kind),
             Operation::Call(func) => {
-                let (func_ptr, arity) = vm
-                    .program
-                    .get_func(func)
-                    .cloned()
-                    .unwrap_or_else(|| panic!("invalid function"));
+                let (func_ptr, arity) = vm.unwrap_or_error(
+                    vm.program.funcs.get(func).cloned(),
+                    ProgramErrorKind::FunctionExists(func),
+                )?;
+                let args = {
+                    match unsafe { vm.obj_stack.last_n(arity) } {
+                        Ok(ts) => Ok(ts),
+                        Err(_) => vm.error(ProgramErrorKind::StackError(arity)),
+                    }
+                }?;
                 let args = if arity > 0 {
-                    vm.program
-                        .register_objects(unsafe { vm.obj_stack.last_n(arity) })
+                    let deferenced: Vec<Object> = args.iter().map(|x| **x).collect();
+                    vm.register_many(&deferenced)
                 } else {
                     &[]
                 };
                 match vm.program.get_memo((func_ptr, args)) {
                     Some(value) => {
                         // println!("YES DUDE {:?}", args);
-                        unsafe { vm.obj_stack.pop_n(arity) };
-                        vm.obj_stack.push(*value);
+                        match unsafe { vm.obj_stack.pop_n(arity) } {
+                            Ok(ts) => Ok(ts),
+                            Err(_) => vm.error(ProgramErrorKind::StackError(arity)),
+                        }?;
+                        let value = vm.register_single(*value);
+                        vm.obj_stack.push(value);
+                        Ok(())
                     }
                     None => {
                         vm.call_stack.push(Frame::new(vm.counter, FrameKind::Call));
-                        let current_frame = vm.call_stack.last_mut();
+                        let current_frame = match vm.call_stack.last_mut() {
+                            Ok(ts) => Ok(ts),
+                            Err(e) => return vm.error(e),
+                        }?;
                         let args = if args.len() > 0 {
-                            vm.program.register_objects(args)
+                            vm.program.register_arguments(args)
                         } else {
                             args
                         };
                         current_frame.memo_key = (func_ptr, args);
                         vm.jump(&func);
+                        Ok(())
                     }
                 }
             }
-            Operation::PushLit(literal) => vm.obj_stack.push(*literal),
+            Operation::PushLit(literal) => {
+                let get_const = vm.get_const(literal);
+                if let Some(lit) = get_const {
+                    vm.obj_stack.push(lit);
+                } else {
+                    let string = unsafe { String::from_utf8_unchecked(literal.to_vec()) };
+                    let obj = {
+                        if string.starts_with('[') && string.ends_with(']') {
+                            // let literals = &string[1..string.len() - 1];
+                            todo!("pushing many at a time")
+                        } else if string.starts_with('"') && string.ends_with('"') {
+                            let s = &string[1..string.len() - 1];
+                            let sb = vm.program.register(s.to_owned());
+                            vm.register_single(Object {
+                                kind: ObjectKind::String,
+                                data: ObjectData::String(sb),
+                            })
+                        } else if string == "Nil" {
+                            vm.register_single(Object::nil())
+                        } else if string.chars().all(|c| c.is_numeric()) {
+                            let num: isize = match utils::string_to_t(string) {
+                                Ok(v) => v,
+                                Err(e) => return vm.error(e),
+                            };
+                            vm.register_single(Object {
+                                kind: ObjectKind::Integer,
+                                data: ObjectData::Integer(num),
+                            })
+                        } else if utils::string_is_float_like(string.clone()) {
+                            let (wholestr, precstr) = string.split_at(string.find('.').unwrap());
+                            let whole: isize = match utils::string_to_t(wholestr.to_owned()) {
+                                Ok(v) => v,
+                                Err(e) => return vm.error(e),
+                            };
+                            let prec: usize = match utils::string_to_t(precstr[1..].to_owned()) {
+                                Ok(v) => v,
+                                Err(e) => return vm.error(e),
+                            };
+                            vm.register_single(Object {
+                                kind: ObjectKind::Float,
+                                data: ObjectData::Float(whole, prec),
+                            })
+                        } else {
+                            return vm.error(ProgramErrorKind::ParsingError(
+                                utils::bytes_to_string(literal),
+                            ));
+                        }
+                    };
+                    vm.obj_stack.push(obj);
+                    vm.store_const(literal, *obj);
+                }
+                Ok(())
+            }
             Operation::PushName(name) => {
-                let frame = vm.call_stack.last();
-                let item = frame
-                    .get_local(name)
-                    .unwrap_or_else(|| panic!("No such variable '{:?}'", name));
-                vm.obj_stack.push(
-                    frame
-                        .get_local(name)
-                        .unwrap_or_else(|| panic!("No such variable '{:?}'", name)),
-                );
-
-                // println!("pushing {name}: {item}");
+                let frame = {
+                    match vm.call_stack.last() {
+                        Ok(ts) => Ok(ts),
+                        Err(_) => vm.error(ProgramErrorKind::StackError(1)),
+                    }
+                }?;
+                let item = {
+                    let option = frame.get_local(name);
+                    let kind = ProgramErrorKind::VariableExists(name);
+                    match utils::unwrap_or_error(option, kind) {
+                        Ok(v) => Ok(v),
+                        Err(e) => return vm.error(e),
+                    }
+                }?;
+                vm.obj_stack.push(item);
+                Ok(())
             }
             Operation::PushTemp => {
-                let tmp = vm
-                    .temp
-                    .unwrap_or_else(|| panic!("No object stored in the temp!"));
+                let tmp = vm.unwrap_or_error(vm.temp, ProgramErrorKind::TempPush)?;
                 vm.obj_stack.push(tmp);
+                Ok(())
             }
-            Operation::Pop => {
-                vm.obj_stack.pop();
-            }
-            Operation::ReturnIf(name) => {
-                let b = vm.obj_stack.pop();
-                assert_eq!(b.0, ObjectKind::Bool, "Object is not a boolean");
-                let bol: &str = unsafe { std::mem::transmute(b.1) };
-                match bol {
-                    "true" => {
-                        let frame = vm.call_stack.pop();
-                        vm.obj_stack.push(
-                            frame
-                                .get_local(name)
-                                .unwrap_or_else(|| panic!("No such object '{}'!", name)),
-                        );
-                        vm.counter = frame.return_address;
-                        let return_value = *vm.obj_stack.last_option().unwrap_or(&Object::dummy());
-                        vm.program.set_memo(frame.memo_key, return_value);
-                    }
-                    "false" => return,
-                    _ => unreachable!(),
+            Operation::Pop => match {
+                match { vm.obj_stack.pop() } {
+                    Ok(t) => Ok(t),
+                    Err(_) => vm.error(ProgramErrorKind::StackError(1)),
                 }
+            } {
+                Ok(_) => Ok(()),
+                Err(e) => Err(e),
+            },
+            Operation::ReturnIf(name) => {
+                let b = {
+                    match { vm.obj_stack.pop() } {
+                        Ok(t) => Ok(t),
+                        Err(_) => vm.error(ProgramErrorKind::StackError(1)),
+                    }
+                }?;
+                assert_eq!(b.kind, ObjectKind::Bool, "Object is not a boolean");
+                if let ObjectData::Bool(bol) = b.data {
+                    if bol {
+                        let frame = {
+                            match { vm.call_stack.pop() } {
+                                Ok(t) => Ok(t),
+                                Err(_) => vm.error(ProgramErrorKind::StackError(1)),
+                            }
+                        }?;
+                        vm.obj_stack.push(vm.unwrap_or_error(
+                            frame.get_local(name),
+                            ProgramErrorKind::VariableExists(name),
+                        )?);
+                        vm.counter = frame.return_address;
+                        let return_value = *vm.obj_stack.last_option().unwrap_or(&&Object {
+                            kind: ObjectKind::Nil,
+                            data: ObjectData::Nil,
+                        });
+                        vm.program.set_memo(frame.memo_key, *return_value);
+                    }
+                }
+                Ok(())
             }
             Operation::StoreConst(name) => {
-                let obj = vm.obj_stack.pop();
-                vm.store_const(*name, obj);
+                let obj = {
+                    match { vm.obj_stack.pop() } {
+                        Ok(t) => Ok(t),
+                        Err(_) => vm.error(ProgramErrorKind::StackError(1)),
+                    }
+                }?;
+                vm.store_const(*name, *obj);
+                Ok(())
             }
             Operation::StoreName(name) => {
-                let frame = vm.call_stack.last_mut();
-                frame.add_local(*name, vm.obj_stack.pop());
+                let frame = {
+                    match vm.call_stack.last_mut() {
+                        Ok(ts) => Ok(ts),
+                        Err(_) => vm.error(ProgramErrorKind::StackError(1)),
+                    }
+                }?;
+                frame.add_local(*name, {
+                    match { vm.obj_stack.pop() } {
+                        Ok(t) => Ok(t),
+                        Err(_) => Err(ProgramError(
+                            ProgramErrorKind::StackError(1),
+                            vm.current_span.clone(),
+                        )),
+                    }
+                }?);
+                Ok(())
             }
             Operation::StoreTemp => {
-                let obj = vm.obj_stack.pop();
+                let obj = {
+                    match { vm.obj_stack.pop() } {
+                        Ok(t) => Ok(t),
+                        Err(_) => Err(ProgramError(
+                            ProgramErrorKind::StackError(1),
+                            vm.current_span.clone(),
+                        )),
+                    }
+                }?;
                 vm.temp = Some(obj);
+                Ok(())
             }
-            Operation::Func(_, _) => {}
+            Operation::Func(_, _) => Ok(()),
             Operation::Done => {
-                let frame = vm.call_stack.pop();
+                let frame = {
+                    match { vm.call_stack.pop() } {
+                        Ok(t) => Ok(t),
+                        Err(_) => Err(ProgramError(
+                            ProgramErrorKind::StackError(1),
+                            vm.current_span.clone(),
+                        )),
+                    }
+                }?;
                 match frame.kind {
                     FrameKind::Call => {
-                        let return_value = *vm.obj_stack.last_option().unwrap_or(&Object::dummy());
-                        vm.program.set_memo(frame.memo_key, return_value);
+                        let return_value = *vm.obj_stack.last_option().unwrap_or(&&Object {
+                            kind: ObjectKind::Nil,
+                            data: ObjectData::Nil,
+                        });
+                        vm.program.set_memo(frame.memo_key, *return_value);
                         vm.counter = frame.return_address;
                     }
                     FrameKind::Loop => {
                         let next_frame = vm.call_stack.last_mut_option();
                         if let Some(nxt) = next_frame {
-                            // println!("{nxt:?}\n{frame:?}");
                             if nxt.return_address == frame.return_address {
-                                // println!("YES DUDE !!! {}", vm.counter);
                                 nxt.copy_locals(&frame);
                                 vm.counter = frame.return_address;
                             } else {
-                                // println!("YES DUDE !!! {}", vm.counter);
                                 vm.counter = vm.counter + 1;
-                                return;
+                                return Ok(());
                             }
                         }
                     }
                     FrameKind::Main => todo!(),
                 }
+                Ok(())
             }
             Operation::Exit => {
                 // println!("i have been called");
                 std::process::exit(0);
             }
             Operation::CallBuiltIn(built_in) => {
-                let obj = vm.obj_stack.pop();
-                if ObjectKind::MutablePtr == obj.0 {
-                    let pointer = obj.pointer();
-                    let mobj = vm.heap.get(&pointer).unwrap();
-                    if let MutableObject::List(l) = mobj {
-                        let objs: Vec<Object> = l
-                            .iter()
-                            .map(|o| vm.heap.get(&o.pointer()).unwrap().into())
-                            .collect();
-                        built_in.call_with_slice(&objs);
-                        return;
+                let obj = {
+                    match { vm.obj_stack.pop() } {
+                        Ok(t) => Ok(t),
+                        Err(_) => Err(ProgramError(
+                            ProgramErrorKind::StackError(1),
+                            vm.current_span.clone(),
+                        )),
                     }
-                }
-                built_in.call(obj);
+                }?;
+                built_in.call(*obj);
+                Ok(())
             }
             Operation::DoFor => {
                 // TODO let done work with this
-                let times = vm.obj_stack.pop().integer();
-                let pc = vm.counter.clone();
-                for _ in 0..times {
-                    let mut frame = Frame::new(pc, FrameKind::Loop);
-                    frame.copy_locals(vm.call_stack.last());
-                    vm.call_stack.push(frame);
+                let object = {
+                    match { vm.obj_stack.pop() } {
+                        Ok(t) => Ok(t),
+                        Err(_) => Err(ProgramError(
+                            ProgramErrorKind::StackError(1),
+                            vm.current_span.clone(),
+                        )),
+                    }
+                }?;
+                if let ObjectData::Integer(times) = object.data {
+                    let pc = vm.counter.clone();
+                    for _ in 0..times {
+                        let mut frame = Frame::new(pc, FrameKind::Loop);
+                        frame.copy_locals({
+                            match vm.call_stack.last() {
+                                Ok(ts) => Ok(ts),
+                                Err(_) => Err(ProgramError(
+                                    ProgramErrorKind::StackError(1),
+                                    vm.current_span.clone(),
+                                )),
+                            }
+                        }?);
+                        vm.call_stack.push(frame);
+                    }
                 }
+                Ok(())
             }
             Operation::DoForIn(obj_name) => {
-                let current_frame = vm.call_stack.last();
+                let current_frame = {
+                    match vm.call_stack.last() {
+                        Ok(ts) => Ok(ts),
+                        Err(_) => vm.error(ProgramErrorKind::StackError(1)),
+                    }
+                }?;
                 let maybe_obj_ptr = current_frame.get_local(obj_name);
-                let pointer = match maybe_obj_ptr {
-                    Some(pointer) => pointer,
-                    None => panic!("No such name '{}'", obj_name),
+                let obj_ptr = maybe_obj_ptr.unwrap_or_else(|| {
+                    panic!("No such name '{}'", utils::bytes_to_string(obj_name))
+                });
+                match obj_ptr.as_tuple() {
+                    (ObjectKind::List, ObjectData::List(start, len)) => {
+                        let pc = vm.counter.clone();
+                        for _ in 0..len {
+                            let mut frame = Frame::new(pc, FrameKind::Loop);
+                            frame.copy_locals({
+                                match vm.call_stack.last() {
+                                    Ok(ts) => Ok(ts),
+                                    Err(_) => vm.error(ProgramErrorKind::StackError(1)),
+                                }
+                            }?);
+                            vm.call_stack.push(frame);
+                        }
+                    }
+                    (kind, _data) => {
+                        return vm.error(ProgramErrorKind::TypeError(ObjectKind::List, kind))
+                    }
+                }
+                Ok(())
+            }
+            Operation::CreateList(maybe_num) => {
+                let num = match maybe_num {
+                    Some(v) => *v,
+                    None => {
+                        let obj = vm.obj_stack.pop();
+                        match obj {
+                            Ok(v) => match v.as_tuple() {
+                                (ObjectKind::Integer, ObjectData::Integer(n)) => {
+                                    utils::isize_to_usize(n)
+                                }
+                                (kind, _data) => {
+                                    return vm.error(ProgramErrorKind::TypeError(
+                                        ObjectKind::Integer,
+                                        kind,
+                                    ))
+                                }
+                            },
+
+                            Err(e) => return vm.error(e),
+                        }
+                    }
                 };
-                let obj = vm.heap.get(&pointer.pointer());
-                let times = match obj {
-                    Some(MutableObject::List(l)) => l.len(),
-                    _ => panic!("Not a list"),
+                let pop_res = unsafe { vm.obj_stack.pop_n(num) };
+                let objects: Vec<Object> = match pop_res {
+                    Ok(objs) => objs.iter().map(|o| **o).collect(),
+                    Err(e) => return Err(ProgramError(e, vm.current_span.clone())),
                 };
-                let pc = vm.counter.clone();
-                for _ in 0..times {
-                    let mut frame = Frame::new(pc, FrameKind::Loop);
-                    frame.copy_locals(vm.call_stack.last());
-                    vm.call_stack.push(frame);
-                }
-            }
-            Operation::CreateList(num) => {
-                // create a mutableobject in the heap
-                // push a mutableptr to the stack
-                let idx = vm.create_list(num.pointer());
-                vm.obj_stack.push(Object(
-                    ObjectKind::MutablePtr,
-                    vm.program.register(&idx.to_be_bytes()),
-                ))
-            }
-            Operation::ListPush(num) => {
-                let number_of_items = num.integer();
-                let list_ptr = vm.obj_stack.pop().pointer();
-                let items = unsafe { vm.obj_stack.pop_n(number_of_items.try_into().unwrap()) };
-                let mut ptrs: Vec<Object> = vec![];
-                for i in items {
-                    let index = vm.heap.push((*i).into());
-                    ptrs.push(Object(
-                        ObjectKind::MutablePtr,
-                        vm.program.register(&index.to_be_bytes()),
-                    ));
-                }
-                let list = vm
-                    .heap
-                    .get_mut(&list_ptr)
-                    .unwrap_or_else(|| panic!("no object there"));
-                if let MutableObject::List(l) = list {
-                    let combined = [l, ptrs.as_slice()].concat();
-                    let new_list = vm.program.register_objects(combined.as_slice());
-                    vm.heap.insert(list_ptr, MutableObject::List(new_list));
-                }
-            }
-            Operation::ListGet => {
-                let index = vm.obj_stack.pop().integer();
-                let list_ptr = vm.obj_stack.pop().pointer();
+                let objects: &'static [Object] = vm.register_many(objects.as_slice());
+                let obj = Object {
+                    kind: ObjectKind::List,
+                    data: ObjectData::List(objects.as_ptr(), objects.len()),
+                };
+                let obj: &'static Object = vm.register_single(obj);
+                vm.obj_stack.push(obj);
 
-                let list = vm
-                    .heap
-                    .get(&list_ptr)
-                    .unwrap_or_else(|| panic!("no object there"));
-                // println!("{list_ptr} {index}");
-                if let MutableObject::List(l) = list {
-                    let item_ptr: Object = *l
-                        .get(index as usize)
-                        .unwrap_or_else(|| panic!("nothing there broseph"));
-                    let item = vm
-                        .heap
-                        .get(&item_ptr.pointer())
-                        .unwrap_or_else(|| panic!("nothing there bro"));
-                    vm.obj_stack.push(item.into());
-                    // println!("{item:?}")
-                }
+                Ok(())
             }
-            Operation::ListSet => {
-                let index = vm.obj_stack.pop().pointer();
-                let list_ptr = vm.obj_stack.pop().pointer();
-                let obj = vm.obj_stack.pop();
+            // Operation::ListPush(bytes) => {
+            // TODO
+            // }
+            Operation::ListGet(maybe_idx) => {
+                let idx = match maybe_idx {
+                    Some(v) => *v,
+                    None => {
+                        let obj = vm.obj_stack.pop();
+                        match obj {
+                            Ok(v) => match v.as_tuple() {
+                                (ObjectKind::Integer, ObjectData::Integer(n)) => {
+                                    utils::isize_to_usize(n)
+                                }
+                                (kind, _data) => {
+                                    return vm.error(ProgramErrorKind::TypeError(
+                                        ObjectKind::Integer,
+                                        kind,
+                                    ))
+                                }
+                            },
 
-                let obj_ptr = vm.heap.push(obj.into());
-
-                // println!("set: {index} {list_ptr} {obj} @ {obj_ptr}");
-                let list = vm
-                    .heap
-                    .get_mut(&list_ptr)
-                    .unwrap_or_else(|| panic!("no object there"));
-                if let MutableObject::List(l) = list {
-                    let mut l_vec = l.to_vec();
-                    l_vec.remove(index);
-                    let _ = l_vec.insert(
-                        index,
-                        Object(
-                            ObjectKind::MutablePtr,
-                            vm.program.register(&obj_ptr.to_be_bytes()),
-                        ),
-                    );
-
-                    let registered = vm.program.register_objects(&l_vec);
-                    vm.heap.insert(list_ptr, MutableObject::List(registered));
+                            Err(e) => return vm.error(e),
+                        }
+                    }
+                };
+                let list_obj = match { vm.obj_stack.pop() } {
+                    Ok(t) => Ok(t),
+                    Err(e) => Err(ProgramError(e, vm.current_span.clone())),
+                }?;
+                match (list_obj.kind, list_obj.data) {
+                    (ObjectKind::List, ObjectData::List(start, len)) => unsafe {
+                        if idx < len {
+                            let obj_ptr = start.add(idx);
+                            vm.obj_stack.push(&*obj_ptr);
+                        } else {
+                            return vm.error(ProgramErrorKind::ListIndexError(idx, len));
+                        }
+                    },
+                    (kind, _data) => {
+                        return vm.error(ProgramErrorKind::TypeError(ObjectKind::List, kind))
+                    }
                 }
+                Ok(())
             }
+            Operation::ListSet(maybe_idx) => unsafe {
+                let idx = match maybe_idx {
+                    Some(v) => *v,
+                    None => {
+                        let obj = vm.obj_stack.pop();
+                        match obj {
+                            Ok(v) => match v.as_tuple() {
+                                (ObjectKind::Integer, ObjectData::Integer(n)) => {
+                                    utils::isize_to_usize(n)
+                                }
+                                (kind, _data) => {
+                                    return vm.error(ProgramErrorKind::TypeError(
+                                        ObjectKind::Integer,
+                                        kind,
+                                    ))
+                                }
+                            },
+
+                            Err(e) => return vm.error(e),
+                        }
+                    }
+                };
+                let objects = {
+                    match { vm.obj_stack.pop_n(2) } {
+                        Ok(t) => Ok(t),
+                        Err(e) => Err(ProgramError(e, vm.current_span.clone())),
+                    }
+                }?;
+                let list_obj = objects[1];
+                let obj = objects[0];
+
+                match (list_obj.kind, list_obj.data) {
+                    (ObjectKind::List, ObjectData::List(start, len)) => {
+                        if idx < len {
+                            let entry = start.add(idx) as *mut Object;
+                            entry.copy_from(obj, 1);
+                        } else {
+                            return vm.error(ProgramErrorKind::ListIndexError(idx, len));
+                        }
+                        Ok(())
+                    }
+                    (kind, _) => vm.error(ProgramErrorKind::TypeError(ObjectKind::List, kind)),
+                }
+            },
             Operation::PushRange => {
                 let steps = vm.obj_stack.pop();
                 let end = vm.obj_stack.pop();
                 let start = vm.obj_stack.pop();
-                println!("range: {start}..{end} by {steps}");
-                for i in (start.integer()..end.integer()).step_by(steps.pointer()) {
-                    vm.obj_stack.push(vm.program.register_integer(i));
+                match (start, end, steps) {
+                    (Ok(strt), Ok(nd), Ok(stps)) => match (strt.data, nd.data, stps.data) {
+                        (
+                            ObjectData::Integer(s),
+                            ObjectData::Integer(n),
+                            ObjectData::Integer(ps),
+                        ) => {
+                            let p: usize = match ps.try_into() {
+                                Ok(v) => v,
+                                Err(_) => return vm.error(ProgramErrorKind::IntegerToUnsigned),
+                            };
+                            let values: &'static [Object] = vm.register_many(
+                                (s..n)
+                                    .step_by(p)
+                                    .map(|v| Object {
+                                        kind: ObjectKind::Integer,
+                                        data: ObjectData::Integer(v),
+                                    })
+                                    .collect::<Vec<Object>>()
+                                    .as_slice(),
+                            );
+                            values.iter().for_each(|v| vm.obj_stack.push(v));
+                            Ok(())
+                        }
+                        _ => todo!(),
+                    },
+                    _ => todo!(),
                 }
             }
             Operation::ReturnIfConst(name) => {
-                let b = vm.obj_stack.pop();
-                assert_eq!(b.0, ObjectKind::Bool, "Object is not a boolean");
-                let bol: &str = unsafe { std::mem::transmute(b.1) };
-                match bol {
-                    "true" => {
-                        let frame = vm.call_stack.pop();
-                        vm.obj_stack.push(*vm.get_const(name));
-                        vm.counter = frame.return_address;
-                        let return_value = *vm.obj_stack.last_option().unwrap_or(&Object::dummy());
-                        vm.program.set_memo(frame.memo_key, return_value);
+                let b = {
+                    match { vm.obj_stack.pop() } {
+                        Ok(t) => Ok(t),
+                        Err(_) => vm.error(ProgramErrorKind::StackError(1)),
                     }
-                    "false" => return,
-                    _ => unreachable!(),
+                }?;
+                assert_eq!(b.kind, ObjectKind::Bool, "Object is not a boolean");
+                if let ObjectData::Bool(bol) = b.data {
+                    if bol {
+                        let frame = {
+                            match { vm.call_stack.pop() } {
+                                Ok(t) => Ok(t),
+                                Err(_) => vm.error(ProgramErrorKind::StackError(1)),
+                            }
+                        }?;
+                        let obj = match vm.get_const(name) {
+                            Some(v) => v,
+                            None => return vm.error(ProgramErrorKind::ConstantExists(name)),
+                        };
+                        vm.obj_stack.push(obj);
+                        vm.counter = frame.return_address;
+                        let return_value = *vm.obj_stack.last_option().unwrap_or(&&Object {
+                            kind: ObjectKind::Nil,
+                            data: ObjectData::Nil,
+                        });
+                        vm.program.set_memo(frame.memo_key, *return_value);
+                    }
                 }
+                Ok(())
             }
+            _ => todo!("{}", self),
         }
     }
 }

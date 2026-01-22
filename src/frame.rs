@@ -12,7 +12,7 @@ pub enum FrameKind {
 #[derive(Debug)]
 pub struct Frame {
     // String -> Literal
-    locals: BTreeMap<Object, Object>,
+    locals: BTreeMap<&'static [u8], &'static Object>,
     pub return_address: usize,
     pub memo_key: MemoKey,
     pub kind: FrameKind,
@@ -28,14 +28,14 @@ impl Frame {
         }
     }
 
-    pub fn add_local(&mut self, name: Object, obj: Object) {
+    pub fn add_local(&mut self, name: &'static [u8], obj: &'static Object) {
         // if self.locals.contains_key(name) {
         //     panic!("{} has already been declared");
         // }
         self.locals.insert(name, obj);
     }
 
-    pub fn get_local(&self, name: &Object) -> Option<Object> {
+    pub fn get_local(&self, name: &'static [u8]) -> Option<&'static Object> {
         self.locals.get(name).cloned()
     }
 

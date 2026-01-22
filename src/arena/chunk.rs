@@ -3,8 +3,7 @@ use std::{mem::MaybeUninit, ptr::NonNull};
 pub(crate) struct Chunk<T = u8> {
     /// The raw storage for the arena chunk.
     pub(crate) storage: NonNull<[MaybeUninit<T>]>,
-    ///// The number of valid entries in the chunk.
-    // entries: usize,
+    pub(crate) entries: usize,
 }
 
 impl<T> Drop for Chunk<T> {
@@ -13,11 +12,18 @@ impl<T> Drop for Chunk<T> {
     }
 }
 
+impl<T> std::fmt::Debug for Chunk<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let start = self.storage.addr();
+        write!(f, "<Chunk @ {start}, {} entries>", self.entries)
+    }
+}
+
 impl<T> Chunk<T> {
     pub fn new(cap: usize) -> Self {
         Chunk {
             storage: NonNull::from(Box::leak(Box::new_uninit_slice(cap))),
-            // entries: 0,
+            entries: 0,
         }
     }
 

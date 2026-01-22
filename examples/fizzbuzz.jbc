@@ -54,7 +54,7 @@ func main 0
 
 		push_name nums
 		push_name i
-		list_set
+		list_set 
 
 		push_name i
 		push_lit 1

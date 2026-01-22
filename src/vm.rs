@@ -1,24 +1,27 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, process::ExitCode};
 
 use crate::{
-    binops::BinOpKind,
+    arena,
+    binops::{self, BinOpKind},
+    error::{ProgramError, ProgramErrorKind},
     frame::{Frame, FrameKind},
-    indexmap::{IndexMap, IndexSet},
-    mutable::MutableObject,
-    object::{Object, ObjectKind},
+    object::Object,
     operation::Operation,
     program::Program,
+    span::Span,
     stack::Stack,
+    utils,
 };
 
 pub struct VM {
     pub program: Program,
-    pub consts: HashMap<Object, Object>,
+    pub consts: HashMap<&'static [u8], &'static Object>,
     pub counter: usize,
     pub call_stack: Stack<Frame>,
-    pub heap: IndexMap<MutableObject>,
-    pub obj_stack: Stack<Object>,
-    pub temp: Option<Object>,
+    pub obj_stack: Stack<&'static Object>,
+    pub temp: Option<&'static Object>,
+    pub memory: arena::Manual<Object>,
+    pub current_span: Span,
 }
 
 impl VM {
@@ -26,40 +29,43 @@ impl VM {
     pub fn new(program: Program) -> Self {
         let mut call_stack = Stack::new();
         call_stack.push(Frame::new(program.instructions.len(), FrameKind::Main));
+        let main = program.get_main();
         VM {
             call_stack,
-            counter: program.get_main(),
+            counter: main,
             program,
             consts: HashMap::new(),
-            heap: IndexMap::new(),
             obj_stack: Stack::new(),
             temp: None,
+            memory: Default::default(),
+            current_span: Span::empty(),
         }
     }
 
-    pub fn store_const(&mut self, name: Object, obj: Object) {
+    pub fn register_single(&mut self, obj: Object) -> &'static Object {
+        unsafe { self.register_many([obj].as_slice()).get_unchecked(0) }
+    }
+
+    pub fn register_many(&mut self, objs: &[Object]) -> &'static [Object] {
+        let saved_bytes = self.memory.alloc_slice(objs);
+        let saved_bytes: &'static [Object] = unsafe { &*(saved_bytes as *const [Object]) };
+        saved_bytes
+    }
+
+    pub fn drop(&mut self, obj: &'static Object) {
+        self.memory.deallocate(
+            obj as *const Object as *mut Object,
+            std::alloc::Layout::for_value(obj),
+        );
+    }
+
+    pub fn store_const(&mut self, name: &'static [u8], obj: Object) {
+        let obj: &'static Object = self.register_single(obj);
         self.consts.insert(name, obj);
     }
 
-    pub fn get_const(&self, name: &Object) -> &Object {
-        self.consts.get(name).unwrap()
-    }
-
-    pub fn create_list(&mut self, n: usize) -> usize {
-        let objects = unsafe { self.obj_stack.pop_n(n) };
-        let items: Vec<MutableObject> = objects.iter().map(|o| (*o).into()).collect();
-        let idxs: Vec<usize> = items.iter().map(|i| self.heap.push(*i)).collect();
-        let objs: Vec<Object> = idxs
-            .iter()
-            .map(|idx| {
-                Object(
-                    ObjectKind::MutablePtr,
-                    self.program.register(&idx.to_be_bytes()),
-                )
-            })
-            .collect();
-        let registered_objs = self.program.register_objects(objs.as_slice());
-        self.heap.push(MutableObject::List(registered_objs))
+    pub fn get_const(&self, name: &'static [u8]) -> Option<&'static Object> {
+        self.consts.get(name).map(|v| &**v)
     }
 
     pub fn from_string(text: String) -> Self {
@@ -70,6 +76,7 @@ impl VM {
     pub fn run(&mut self) {
         self.counter = self.program.get_main();
         loop {
+            self.update_span();
             if self.counter == self.program.instructions.len() - 1 {
                 return;
             }
@@ -83,20 +90,22 @@ impl VM {
                         self.obj_stack
                             .last_n(10)
                             .iter()
-                            .map(|x| format!("{}", x))
+                            .map(|x| format!("{:?}", x))
                             .collect::<Vec<String>>()
                     )
                 }
             }
             let op = self.next();
-            // println!(
-            // "op: {:?}, pc: {}, tmp: {:?}, objstack: {:?}",
-            // op.unwrap(),
-            // self.counter,
-            // self.temp,
-            // self.obj_stack
-            // );
-            op.unwrap().call(self);
+            let res = op.unwrap().call(self);
+
+            match res {
+                Ok(_) => {}
+                Err(e) => {
+                    println!("\nruntime failure:\n{}", e);
+                    std::process::exit(1);
+                }
+            }
+
             if let Operation::Exit = self.program.get_op(self.counter) {
                 self.counter = self.program.get_main();
                 self.obj_stack = Stack::new();
@@ -107,6 +116,32 @@ impl VM {
         }
     }
 
+    fn update_span(&mut self) {
+        let prev_op_pc = self.counter.checked_sub(1);
+        let prev_op = match prev_op_pc {
+            Some(s) => self
+                .program
+                .instructions
+                .get(s)
+                .unwrap_or(&Operation::Empty),
+            None => &Operation::Empty,
+        };
+        self.current_span = Span {
+            current_op: *self
+                .program
+                .instructions
+                .get(self.counter)
+                .unwrap_or(&Operation::Empty),
+            program_count: self.counter,
+            prev_op: *prev_op,
+            next_op: *self
+                .program
+                .instructions
+                .get(self.counter + 1)
+                .unwrap_or(&Operation::Empty),
+        };
+    }
+
     #[inline]
     pub fn next(&mut self) -> Option<Operation> {
         let op = self.program.get_op(self.counter);
@@ -114,10 +149,11 @@ impl VM {
         return Some(*op);
     }
 
-    pub fn jump(&mut self, func: &Object) {
+    pub fn jump(&mut self, func: &'static [u8]) {
         let (idx, _arity) = *self
             .program
-            .get_func(func)
+            .funcs
+            .get(func)
             .unwrap_or_else(|| panic!("No such function: {:?}", func));
         self.counter = idx;
     }
@@ -126,12 +162,55 @@ impl VM {
         self.counter = counter
     }
 
-    pub fn handle_bin_op(&mut self, kind: &BinOpKind) {
-        let pair = unsafe { self.obj_stack.pop_n(2) };
-        let lhs = pair[0];
-        let rhs = pair[1];
+    pub fn handle_bin_op(&mut self, kind: BinOpKind) -> Result<(), ProgramError> {
+        let pair = {
+            match unsafe { self.obj_stack.pop_n(2) } {
+                Ok(ts) => Ok(ts),
+                Err(_) => Err(ProgramError(
+                    ProgramErrorKind::StackError(2),
+                    self.current_span.clone(),
+                )),
+            }
+        }?;
+        let lhs = pair[0].data;
+        let rhs = pair[1].data;
 
-        self.obj_stack
-            .push(self.program.handle_bin_op(*kind, lhs, rhs))
+        let result = match kind {
+            BinOpKind::Add => binops::add(lhs, rhs),
+            BinOpKind::Sub => binops::sub(lhs, rhs),
+            BinOpKind::Mul => binops::mul(lhs, rhs),
+            BinOpKind::Div => binops::div(lhs, rhs),
+            BinOpKind::Mod => binops::modulus(lhs, rhs),
+            BinOpKind::Eq => binops::eq(lhs, rhs),
+            BinOpKind::LessEq => binops::lesseq(lhs, rhs),
+            BinOpKind::GreatEq => binops::greateq(lhs, rhs),
+            BinOpKind::Lesser => binops::lesser(lhs, rhs),
+            BinOpKind::Greater => binops::greater(lhs, rhs),
+            BinOpKind::And => binops::and(lhs, rhs),
+            BinOpKind::Or => binops::or(lhs, rhs),
+        };
+
+        match result {
+            Ok(value) => {
+                let value = self.register_single(value);
+                Ok(self.obj_stack.push(value))
+            }
+            Err(e) => Err(ProgramError(e, self.current_span.clone())),
+        }
+    }
+
+    pub fn unwrap_or_error<T>(
+        &self,
+        option: Option<T>,
+        kind: ProgramErrorKind,
+    ) -> Result<T, ProgramError> {
+        match utils::unwrap_or_error(option, kind) {
+            Ok(v) => Ok(v),
+            Err(e) => return Err(ProgramError(e, self.current_span.clone())),
+        }
+    }
+
+    pub fn error<T>(&self, e: ProgramErrorKind) -> Result<T, ProgramError> {
+        Err(ProgramError(e, self.current_span.clone()))
     }
 }

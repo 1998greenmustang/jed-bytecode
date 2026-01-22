@@ -1,7 +1,10 @@
 use std::{
     alloc::{self, Layout},
+    error::Error,
     ptr::{self, NonNull},
 };
+
+use crate::error::ProgramErrorKind;
 
 #[derive(Debug)]
 pub struct Stack<T> {
@@ -60,20 +63,20 @@ impl<T> Stack<T> {
         self.len += 1;
     }
 
-    pub fn pop(&mut self) -> T {
+    pub fn pop(&mut self) -> Result<T, ProgramErrorKind> {
         if self.len == 0 {
-            panic!("pop(): Nothing on the stack")
+            return Err(ProgramErrorKind::StackError(1));
         }
         self.len -= 1;
-        unsafe { ptr::read(self.ptr.as_ptr().add(self.len)) }
+        Ok(unsafe { ptr::read(self.ptr.as_ptr().add(self.len)) })
     }
-    pub unsafe fn pop_n(&mut self, n: usize) -> &[T] {
+    pub unsafe fn pop_n(&mut self, n: usize) -> Result<&[T], ProgramErrorKind> {
         if n > self.len {
-            panic!("Not enough to give you!")
+            Err(ProgramErrorKind::StackError(n))
         } else {
             let nth = &*self.ptr.as_ptr().add(self.len - n);
             self.len -= n;
-            std::slice::from_raw_parts(nth, n)
+            Ok(std::slice::from_raw_parts(nth, n))
         }
     }
 
@@ -81,23 +84,23 @@ impl<T> Stack<T> {
         self.len
     }
 
-    pub fn last(&self) -> &T {
+    pub fn last(&self) -> Result<&T, ProgramErrorKind> {
         if self.len == 0 {
-            panic!("Nothing on the stack")
+            Err(ProgramErrorKind::StackError(1))
         } else {
-            unsafe { &*self.ptr.as_ptr().add(self.len - 1) }
+            Ok(unsafe { &*self.ptr.as_ptr().add(self.len - 1) })
         }
     }
-    pub fn last_mut(&mut self) -> &mut T {
+    pub fn last_mut(&mut self) -> Result<&mut T, ProgramErrorKind> {
         if self.len == 0 {
-            panic!("Nothing on the stack")
+            Err(ProgramErrorKind::StackError(1))
         } else {
-            unsafe { &mut *self.ptr.as_ptr().add(self.len - 1) }
+            Ok(unsafe { &mut *self.ptr.as_ptr().add(self.len - 1) })
         }
     }
     pub fn last_mut_option(&mut self) -> Option<&mut T> {
         if self.len == 0 {
-            panic!("Nothing on the stack")
+            None
         } else {
             unsafe { Some(&mut *self.ptr.as_ptr().add(self.len - 1)) }
         }
@@ -110,12 +113,12 @@ impl<T> Stack<T> {
         }
     }
 
-    pub unsafe fn last_n(&self, n: usize) -> &[T] {
+    pub unsafe fn last_n(&self, n: usize) -> Result<&[T], ProgramErrorKind> {
         if n > self.len {
-            panic!("Not enough to give you!")
+            Err(ProgramErrorKind::StackError(n))
         } else {
             let nth = &*self.ptr.as_ptr().add(self.len - n);
-            std::slice::from_raw_parts(nth, n)
+            Ok(std::slice::from_raw_parts(nth, n))
         }
     }
 }

@@ -5,7 +5,7 @@
 // Rewriting here, for practice. For all intents and purposes, might as well be copied
 //
 
-use crate::arena::{align_down, align_up};
+use crate::arena::{align_down, align_up, HUGE_PAGE, PAGE};
 
 use super::chunk::Chunk;
 use std::slice;
@@ -31,13 +31,6 @@ impl Default for Dropless {
     }
 }
 
-// The arenas start with PAGE-sized chunks, and then each new chunk is twice as
-// big as its predecessor, up until we reach HUGE_PAGE-sized chunks, whereupon
-// we stop growing. This scales well, from arenas that are barely used up to
-// arenas that are used for 100s of MiBs. Note also that the chosen sizes match
-// the usual sizes of pages and huge pages on Linux.
-const PAGE: usize = 4096;
-const HUGE_PAGE: usize = 2 * 1024 * 1024;
 const DROPLESS_ALIGNMENT: usize = align_of::<usize>();
 
 impl Dropless {
@@ -138,7 +131,7 @@ impl Dropless {
 
         unsafe {
             mem.copy_from_nonoverlapping(slice.as_ptr(), slice.len());
-            slice::from_raw_parts_mut(mem, slice.len())
+            return slice::from_raw_parts_mut(mem, slice.len());
         }
     }
 }
