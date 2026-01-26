@@ -22,6 +22,7 @@ pub enum ObjectKind {
     Pointer,
     Nil,
     List,
+    Iterator,
 }
 
 impl TryFrom<&u8> for ObjectKind {
@@ -52,6 +53,7 @@ pub enum ObjectData {
     Func(&'static [u8]),
     List(*const Object, usize), // start, end
     Pointer(*mut &'static Object),
+    Iterator(&'static Object, *mut usize), // internal list, current
     Nil,
 }
 
@@ -74,7 +76,8 @@ impl Debug for ObjectData {
             ObjectData::Func(items) => write!(f, "func ({})", utils::bytes_to_string(items)),
             ObjectData::Pointer(pr) => write!(f, "ptr ({pr:p})"),
             ObjectData::Nil => write!(f, "Nil"),
-            ObjectData::List(start, len) => todo!(),
+            ObjectData::List(start, len) => write!(f, "list (@{start:p}, {len})"),
+            ObjectData::Iterator(list, current) => todo!(),
         }
     }
 }
@@ -102,6 +105,9 @@ impl Display for ObjectData {
                 }
                 write!(f, "]")
             },
+            ObjectData::Iterator(list, current) => unsafe {
+                write!(f, "{} iterator at {}", list, current.read())
+            },
         }
     }
 }
@@ -117,6 +123,7 @@ impl Display for ObjectKind {
             ObjectKind::Pointer => write!(f, "Pointer"),
             ObjectKind::Nil => write!(f, "Nil"),
             ObjectKind::List => write!(f, "List"),
+            ObjectKind::Iterator => write!(f, "Iterator"),
         }
     }
 }
@@ -130,6 +137,12 @@ impl Object {
     }
     pub fn as_tuple(&self) -> (ObjectKind, ObjectData) {
         return (self.kind, self.data);
+    }
+    pub fn as_ptr_mut(&mut self) -> *mut Object {
+        &mut *self as *mut Object
+    }
+    pub fn as_ptr(&self) -> *const Object {
+        &*self as *const Object
     }
 }
 

@@ -1,46 +1,43 @@
 func fib 1
 	store_name n
-
-	push_lit 0
-	store_name a
 	
+	push_name n
 	push_lit 1
-	store_name b
-
-	do_for_name n
-		push_name b
-		store_name a
-
-		push_name a
-		push_name b
-		bin_op +
-		store_name b
-	done
-	push_name a
-done
+	bin_op <=
+	return_if n
 	
-		
+	push_name n
+	push_lit 2
+	bin_op -
+	call fib
+
+	push_name n
+	push_lit 1
+	bin_op -
+	call fib
+	
+	bin_op +
 done
 
 func main 0
 	push_lit 0
+	push_lit 93
 	push_lit 1
-	push_lit 2
-	push_lit 3
-	push_lit 4
-	create_list
-	list_push 5
+	push_range
+	create_list 92
 	store_name nums
 
 	push_lit 0
 	store_name i
-	do_for 5
+	do_for_in nums
 		push_name nums
 		push_name i
 		list_get
 		call fib
 
-		list_set i
+		push_name nums
+		push_name i
+		list_set
 			
 		push_name i
 		push_lit 1
@@ -48,6 +45,7 @@ func main 0
 		store_name i
 	done
 
+	push_name nums
 	push_name nums
 	call_builtin println
 done

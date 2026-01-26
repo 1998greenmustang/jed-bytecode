@@ -1,4 +1,4 @@
-use std::{collections::HashMap, process::ExitCode};
+use std::{collections::HashMap, fs::File, io, process::ExitCode};
 
 use crate::{
     arena,
@@ -71,6 +71,10 @@ impl VM {
     pub fn from_string(text: String) -> Self {
         let program = Program::from_string(text);
         Self::new(program)
+    }
+    pub fn from_file(file: &mut File) -> io::Result<Self> {
+        let program = Program::from_file(file)?;
+        Ok(Self::new(program))
     }
 
     pub fn run(&mut self) {
@@ -211,6 +215,28 @@ impl VM {
     }
 
     pub fn error<T>(&self, e: ProgramErrorKind) -> Result<T, ProgramError> {
+        match e {
+            ProgramErrorKind::StackError(_) => unsafe {
+                println!(
+                    "call stack: {:?}",
+                    self.call_stack
+                        .last_n(10)
+                        .iter()
+                        .map(|x| format!("{:?}", x))
+                        .collect::<Vec<String>>()
+                );
+                println!(
+                    "object stack: {:?}",
+                    self.obj_stack
+                        .last_n(10)
+                        .iter()
+                        .map(|x| format!("{:?}", x))
+                        .collect::<Vec<String>>()
+                );
+            },
+            _ => {}
+        };
+
         Err(ProgramError(e, self.current_span.clone()))
     }
 }

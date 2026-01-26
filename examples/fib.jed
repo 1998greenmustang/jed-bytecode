@@ -20,7 +20,7 @@ func fib 1
 done
 
 func main 0
-	push_lit 5
+	push_lit 14
 	call fib
 	call_builtin println
 done

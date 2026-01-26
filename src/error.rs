@@ -54,7 +54,11 @@ impl Display for ProgramErrorKind {
             ProgramErrorKind::IntegerToUnsigned => {
                 write!(f, "attempt to use an integer as unsigned")
             }
-            ProgramErrorKind::ListIndexError(_, _) => todo!(),
+            ProgramErrorKind::ListIndexError(idx, len) => write!(
+                f,
+                "index '{}' does not appear in a list of {} length",
+                idx, len
+            ),
             ProgramErrorKind::ConstantExists(bytes) => todo!(),
         }
     }

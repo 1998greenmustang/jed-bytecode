@@ -1,4 +1,0 @@
-func main 0
-  push_lit "Hello world!"
-  call_builtin println
-done

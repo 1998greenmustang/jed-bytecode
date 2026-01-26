@@ -32,3 +32,12 @@ impl From<&str> for BuiltIn {
         }
     }
 }
+
+impl From<u8> for BuiltIn {
+    fn from(value: u8) -> Self {
+        match value {
+            0 => BuiltIn::PrintLn,
+            _ => panic!(),
+        }
+    }
+}

@@ -11,7 +11,7 @@ use crate::{
 };
 
 #[derive(Copy, Clone, Debug)]
-#[repr(usize)]
+#[repr(u8)]
 pub enum Operation {
     BinOp(BinOpKind),
     Call(&'static [u8]),
@@ -30,12 +30,109 @@ pub enum Operation {
     DoFor,
     DoForIn(&'static [u8]),
     CreateList(Option<usize>),
-    ListPush(&'static [u8]),
+    ListPush,
     ListGet(Option<usize>),
     ListSet(Option<usize>),
     PushRange,
     ReturnIfConst(&'static [u8]),
+    GetPtr,
+    ReadPtr,
+    SetPtr,
+    GetIter,
+    IterNext,
+    IterPrev,
+    IterSkip,
+    IterCurrent,
     Empty,
+}
+
+impl From<(u8, Option<usize>)> for Operation {
+    fn from(value: (u8, Option<usize>)) -> Self {
+        match value.0 {
+            17 => Operation::CreateList(value.1),
+            19 => Operation::ListGet(value.1),
+            20 => Operation::ListSet(value.1),
+            _ => panic!(),
+        }
+    }
+}
+
+impl From<(u8, &'static [u8])> for Operation {
+    fn from(value: (u8, &'static [u8])) -> Self {
+        match value.0 {
+            2 => Operation::Call(value.1),
+            4 => Operation::PushLit(value.1),
+            5 => Operation::PushName(value.1),
+            8 => Operation::ReturnIf(value.1),
+            9 => Operation::StoreConst(value.1),
+            10 => Operation::StoreName(value.1),
+            16 => Operation::DoForIn(value.1),
+            22 => Operation::ReturnIfConst(value.1),
+            _ => panic!(),
+        }
+    }
+}
+
+impl From<u8> for Operation {
+    fn from(value: u8) -> Self {
+        match value {
+            6 => Operation::PushTemp,
+            7 => Operation::Pop,
+            11 => Operation::StoreTemp,
+            13 => Operation::Done,
+            14 => Operation::Exit,
+            15 => Operation::DoFor,
+            18 => Operation::ListPush,
+            21 => Operation::PushRange,
+            23 => Operation::GetPtr,
+            24 => Operation::ReadPtr,
+            25 => Operation::SetPtr,
+            26 => Operation::GetIter,
+            27 => Operation::IterNext,
+            28 => Operation::IterPrev,
+            29 => Operation::IterSkip,
+            30 => Operation::IterCurrent,
+            _ => panic!(),
+        }
+    }
+}
+
+impl From<Operation> for u8 {
+    fn from(value: Operation) -> Self {
+        match value {
+            Operation::BinOp(_) => 1,
+            Operation::Call(_) => 2,
+            Operation::CallBuiltIn(_) => 3,
+            Operation::PushLit(_) => 4,
+            Operation::PushName(_) => 5,
+            Operation::PushTemp => 6,
+            Operation::Pop => 7,
+            Operation::ReturnIf(_) => 8,
+            Operation::StoreConst(_) => 9,
+            Operation::StoreName(_) => 10,
+            Operation::StoreTemp => 11,
+            Operation::Func(_, _) => 12,
+            Operation::Done => 13,
+            Operation::Exit => 14,
+            Operation::DoFor => 15,
+            Operation::DoForIn(_) => 16,
+            Operation::CreateList(_) => 17,
+            Operation::ListPush => 18,
+            Operation::ListGet(_) => 19,
+            Operation::ListSet(_) => 20,
+            Operation::PushRange => 21,
+            Operation::ReturnIfConst(_) => 22,
+            Operation::GetPtr => 23,
+            Operation::ReadPtr => 24,
+            Operation::SetPtr => 25,
+            Operation::GetIter => 26,
+            Operation::IterNext => 27,
+            Operation::IterPrev => 28,
+            Operation::IterSkip => 29,
+            Operation::IterCurrent => 30,
+            Operation::Empty => todo!(),
+        }
+    }
 }
 
 impl Display for Operation {
@@ -60,7 +157,7 @@ impl Display for Operation {
             Operation::CreateList(idx) => {
                 write!(f, "create_list {}", utils::unwrap_as_string_or(*idx, ""))
             }
-            Operation::ListPush(items) => write!(f, "list_push {}", bytes_to_string(items)),
+            Operation::ListPush => write!(f, "list_push"),
             Operation::ListGet(idx) => {
                 write!(f, "list_get {}", utils::unwrap_as_string_or(*idx, ""))
             }
@@ -71,6 +168,14 @@ impl Display for Operation {
             Operation::ReturnIfConst(items) => {
                 write!(f, "return_if_const {}", bytes_to_string(items))
             }
+            Operation::GetPtr => write!(f, "get_ptr"),
+            Operation::ReadPtr => write!(f, "read_ptr"),
+            Operation::SetPtr => write!(f, "set_ptr"),
+            Operation::GetIter => write!(f, "get_iter"),
+            Operation::IterNext => write!(f, "iter_next"),
+            Operation::IterPrev => write!(f, "iter_prev"),
+            Operation::IterSkip => write!(f, "iter_skip"),
+            Operation::IterCurrent => write!(f, "iter_current"),
             Operation::Empty => write!(f, ""),
         }
     }
@@ -101,6 +206,14 @@ impl Operation {
             "list_set" => true,
             "push_range" => true,
             "return_if_const" => true,
+            "get_ptr" => true,
+            "read_ptr" => true,
+            "set_ptr" => true,
+            "get_iter" => true,
+            "iter_next" => true,
+            "iter_prev" => true,
+            "iter_skip" => true,
+            "iter_current" => true,
             _ => false,
         }
     }
@@ -129,6 +242,14 @@ impl Operation {
             "list_set" => 20,
             "push_range" => 21,
             "return_if_const" => 22,
+            "get_ptr" => 23,
+            "read_ptr" => 24,
+            "set_ptr" => 25,
+            "get_iter" => 26,
+            "iter_next" => 27,
+            "iter_prev" => 28,
+            "iter_skip" => 29,
+            "iter_current" => 30,
             _ => 0,
         }
     }
@@ -235,6 +356,7 @@ impl Operation {
                 Ok(())
             }
             Operation::PushName(name) => {
+                // println!("{}", utils::bytes_to_string(name));
                 let frame = {
                     match vm.call_stack.last() {
                         Ok(ts) => Ok(ts),
@@ -313,25 +435,18 @@ impl Operation {
                         Err(_) => vm.error(ProgramErrorKind::StackError(1)),
                     }
                 }?;
-                frame.add_local(*name, {
-                    match { vm.obj_stack.pop() } {
-                        Ok(t) => Ok(t),
-                        Err(_) => Err(ProgramError(
-                            ProgramErrorKind::StackError(1),
-                            vm.current_span.clone(),
-                        )),
-                    }
-                }?);
+                let obj = match vm.obj_stack.pop() {
+                    Ok(t) => t,
+                    Err(e) => return vm.error(e),
+                };
+                frame.add_local(*name, obj);
                 Ok(())
             }
             Operation::StoreTemp => {
                 let obj = {
                     match { vm.obj_stack.pop() } {
                         Ok(t) => Ok(t),
-                        Err(_) => Err(ProgramError(
-                            ProgramErrorKind::StackError(1),
-                            vm.current_span.clone(),
-                        )),
+                        Err(e) => vm.error(e),
                     }
                 }?;
                 vm.temp = Some(obj);
@@ -342,10 +457,7 @@ impl Operation {
                 let frame = {
                     match { vm.call_stack.pop() } {
                         Ok(t) => Ok(t),
-                        Err(_) => Err(ProgramError(
-                            ProgramErrorKind::StackError(1),
-                            vm.current_span.clone(),
-                        )),
+                        Err(e) => vm.error(e),
                     }
                 }?;
                 match frame.kind {
@@ -381,10 +493,7 @@ impl Operation {
                 let obj = {
                     match { vm.obj_stack.pop() } {
                         Ok(t) => Ok(t),
-                        Err(_) => Err(ProgramError(
-                            ProgramErrorKind::StackError(1),
-                            vm.current_span.clone(),
-                        )),
+                        Err(e) => vm.error(e),
                     }
                 }?;
                 built_in.call(*obj);
@@ -395,10 +504,7 @@ impl Operation {
                 let object = {
                     match { vm.obj_stack.pop() } {
                         Ok(t) => Ok(t),
-                        Err(_) => Err(ProgramError(
-                            ProgramErrorKind::StackError(1),
-                            vm.current_span.clone(),
-                        )),
+                        Err(e) => vm.error(e),
                     }
                 }?;
                 if let ObjectData::Integer(times) = object.data {
@@ -408,10 +514,7 @@ impl Operation {
                         frame.copy_locals({
                             match vm.call_stack.last() {
                                 Ok(ts) => Ok(ts),
-                                Err(_) => Err(ProgramError(
-                                    ProgramErrorKind::StackError(1),
-                                    vm.current_span.clone(),
-                                )),
+                                Err(e) => vm.error(e),
                             }
                         }?);
                         vm.call_stack.push(frame);
@@ -475,7 +578,7 @@ impl Operation {
                 let pop_res = unsafe { vm.obj_stack.pop_n(num) };
                 let objects: Vec<Object> = match pop_res {
                     Ok(objs) => objs.iter().map(|o| **o).collect(),
-                    Err(e) => return Err(ProgramError(e, vm.current_span.clone())),
+                    Err(e) => return vm.error(e),
                 };
                 let objects: &'static [Object] = vm.register_many(objects.as_slice());
                 let obj = Object {
@@ -487,9 +590,24 @@ impl Operation {
 
                 Ok(())
             }
-            // Operation::ListPush(bytes) => {
-            // TODO
-            // }
+            Operation::ListPush => unsafe {
+                let objs = match vm.obj_stack.pop_n(2) {
+                    Ok(t) => Ok(t),
+                    Err(e) => vm.error(e),
+                }?;
+                let list_obj = objs.get_unchecked(0);
+                let obj = objs.get_unchecked(1);
+
+                if let ObjectData::List(start, len) = list_obj.data {
+                    // TODO
+                } else {
+                    return Err(ProgramError(
+                        ProgramErrorKind::TypeError(ObjectKind::List, list_obj.kind),
+                        vm.current_span.clone(),
+                    ));
+                }
+                Ok(())
+            },
             Operation::ListGet(maybe_idx) => {
                 let idx = match maybe_idx {
                     Some(v) => *v,
@@ -514,7 +632,7 @@ impl Operation {
                 };
                 let list_obj = match { vm.obj_stack.pop() } {
                     Ok(t) => Ok(t),
-                    Err(e) => Err(ProgramError(e, vm.current_span.clone())),
+                    Err(e) => vm.error(e),
                 }?;
                 match (list_obj.kind, list_obj.data) {
                     (ObjectKind::List, ObjectData::List(start, len)) => unsafe {
@@ -556,7 +674,7 @@ impl Operation {
                 let objects = {
                     match { vm.obj_stack.pop_n(2) } {
                         Ok(t) => Ok(t),
-                        Err(e) => Err(ProgramError(e, vm.current_span.clone())),
+                        Err(e) => vm.error(e),
                     }
                 }?;
                 let list_obj = objects[1];
@@ -637,6 +755,123 @@ impl Operation {
                         vm.program.set_memo(frame.memo_key, *return_value);
                     }
                 }
+                Ok(())
+            }
+            Operation::GetPtr => {
+                let obj: &'static Object = {
+                    match { vm.obj_stack.pop() } {
+                        Ok(t) => Ok(t),
+                        Err(_) => vm.error(ProgramErrorKind::StackError(1)),
+                    }
+                }?;
+
+                let ptr_obj = {
+                    Object {
+                        kind: ObjectKind::Pointer,
+                        data: ObjectData::Pointer(&mut &*obj as *mut &Object),
+                    }
+                };
+                let ptr_obj: &'static Object = vm.register_single(ptr_obj);
+                vm.obj_stack.push(ptr_obj);
+
+                Ok(())
+            }
+            Operation::ReadPtr => {
+                let ptr_obj: &'static Object = {
+                    match { vm.obj_stack.pop() } {
+                        Ok(t) => Ok(t),
+                        Err(_) => vm.error(ProgramErrorKind::StackError(1)),
+                    }
+                }?;
+
+                if let ObjectData::Pointer(real_ptr) = ptr_obj.data {
+                    let val: &'static Object = unsafe { real_ptr.read() };
+                    vm.obj_stack.push(val);
+                } else {
+                    return vm.error(ProgramErrorKind::TypeError(
+                        ObjectKind::Pointer,
+                        ptr_obj.kind,
+                    ));
+                }
+
+                Ok(())
+            }
+            Operation::SetPtr => unsafe {
+                let objects = {
+                    match { vm.obj_stack.pop_n(2) } {
+                        Ok(t) => Ok(t),
+                        Err(_) => vm.error(ProgramErrorKind::StackError(2)),
+                    }
+                }?;
+                let obj = objects.get_unchecked(0);
+                let ptr_obj = objects.get_unchecked(1);
+
+                if let ObjectData::Pointer(real_ptr) = ptr_obj.data {
+                    real_ptr.copy_from(obj, 1);
+                } else {
+                    return Err(ProgramError(
+                        ProgramErrorKind::TypeError(ObjectKind::Pointer, ptr_obj.kind),
+                        vm.current_span.clone(),
+                    ));
+                }
+
+                Ok(())
+            },
+            Operation::GetIter => {
+                let list_obj: &'static Object = {
+                    match { vm.obj_stack.pop() } {
+                        Ok(t) => Ok(t),
+                        Err(_) => vm.error(ProgramErrorKind::StackError(1)),
+                    }
+                }?;
+                if let ObjectKind::List = list_obj.kind {
+                    let iter_obj = Object {
+                        kind: ObjectKind::Iterator,
+                        data: ObjectData::Iterator(list_obj, 0 as *mut usize),
+                    };
+                    let iter_obj: &'static Object = vm.register_single(iter_obj);
+                    vm.obj_stack.push(iter_obj);
+                } else {
+                    return vm.error(ProgramErrorKind::TypeError(ObjectKind::List, list_obj.kind));
+                }
+                Ok(())
+            }
+            Operation::IterNext => {
+                // let mut iter_obj = {
+                //     match { vm.obj_stack.pop_mut() } {
+                //         Ok(t) => Ok(t),
+                //         Err(_) => vm.error(ProgramErrorKind::StackError(1)),
+                //     }
+                // }?;
+
+                // if let ObjectData::Iterator(list, mut current) = iter_obj.data {
+                //     if let ObjectData::List(start, len) = list.data {
+                //         let new_current = unsafe { current.read() } + 1;
+                //         if new_current < len {
+                //             current = new_current as *mut usize;
+                //             vm.obj_stack.push(unsafe { &start.add(new_current).read() });
+                //         } else {
+                //             return Ok(());
+                //         }
+                //     }
+                // } else {
+                //     return vm.error(ProgramErrorKind::TypeError(
+                //         ObjectKind::Iterator,
+                //         iter_obj.kind,
+                //     ));
+                // }
+                Ok(())
+            }
+            Operation::IterPrev => {
+                // TODO
+                Ok(())
+            }
+            Operation::IterSkip => {
+                // TODO
+                Ok(())
+            }
+            Operation::IterCurrent => {
+                // TODO
                 Ok(())
             }
             _ => todo!("{}", self),

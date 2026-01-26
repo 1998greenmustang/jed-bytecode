@@ -1,3 +1,8 @@
+use std::{
+    fs::File,
+    io::{self, Read},
+};
+
 use crate::error::ProgramErrorKind;
 
 pub fn bytes_to_string(bytes: &[u8]) -> String {

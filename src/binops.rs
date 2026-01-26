@@ -62,6 +62,13 @@ impl From<&str> for BinOpKind {
     }
 }
 
+impl From<u8> for BinOpKind {
+    fn from(value: u8) -> Self {
+        assert!(value <= 12);
+        unsafe { std::mem::transmute(value) }
+    }
+}
+
 pub fn add(lhs: ObjectData, rhs: ObjectData) -> Result<Object, ProgramErrorKind> {
     match (lhs, rhs) {
         (ObjectData::Integer(left), ObjectData::Integer(right)) => match left.checked_add(right) {
