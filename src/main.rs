@@ -85,16 +85,6 @@ fn parse_args() -> Result<Args, lexopt::Error> {
     })
 }
 
-fn compile(text: String, output: &Path) -> io::Result<()> {
-    let program = Program::from_string(text);
-
-    let file = File::create(output);
-    match file {
-        Ok(mut f) => program.to_file(&mut f),
-        Err(_) => todo!(),
-    }
-}
-
 fn main() -> io::Result<()> {
     let opts = match parse_args() {
         Ok(opts) => opts,
