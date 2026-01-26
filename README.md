@@ -3,13 +3,33 @@
 This repo contains a stack-machine based bytecode interpreter for my self-study projects.
 This will serve as the backend for many of my own languages.
 
+## Building
+
+`cargo build --release`
+
+or use `cargo run`, I'm not your dad.
+
 ## Running
 
-Currently, this does NOT accept files as input. It produces a binary using whatever "byte"-code is in `src/main.rs`.
+There are three commands:
 
-To run examples, copy & paste from the `examples` directory into the `VM::from_string()` call in `src/main.rs`.
+ - Compile: convert string Jed Bytecode to Bytecode
+ - Run: interpret either string Jed Bytecode or Bytecode
+ - Validate: parse string Jed Bytecode or Bytecode
 
-Then use `cargo run` or `cargo build --release` for a more optimized version.
+
+There are also options, but they do nothing:
+ - --output, -o: path to the directory to save compiled files
+ - --debug: print debug statements
+
+To run examples with the built program:
+```sh
+  jar run ./examples/helloworld.jed
+```
+or with `cargo run`:
+```sh
+  cargo run run ./examples/helloworld.jed
+```
 
 ### Hello World in Jed Bytecode
 ```text
@@ -21,13 +41,11 @@ done
 
 ## Future and Rational
 
-In the future, this will be able to accept files as input so other languages can compile into the bytecode served here.
-
 This project is meant to serve as a simple RTS for various languages I decide to explore design-wise in the future.
 I started this project when I was working on my firstever language 'jed' then once it could finally generate code, I didn't have a backend ready.
 So, I made a very simple AST crawler runtime that was very annoying. So I wanted to create a bytecode interpreter that I don't have to worry about.
 
-That's what this project is. This is not to replace any other thing like QBE or LLVM or even BEAM, it's for my own exploration of what languages are.
+That's what this project is. This is not to replace any other backend, it's for my own exploration of what languages are.
 
 ## The Language
 
@@ -36,35 +54,33 @@ I don't think I did a very good job of actually doing that, **but** I enjoy the 
 
 ### It's bad.
 
-A major issue of this is the memory usage. Every thing is a considered an "object" which is a tuple struct of `(ObjectKind, &'static [u8])`
-When creating a new object, without exception, the VM will register the data into a _Dropless_ Arena.
-
-This includes lists, which are defined as `&'static [Object]`. Each object in a list are a wrapped `MutablePtr`, which is a `usize`.
-Any change to a list, will re-register the objects into the arena.
+Objects get registered into static memory and never get removed. I...uh... added a deallocator arena but I never drop.
 
 ### Structure
 
-The VM contains a map of constants, 1 register, an object stack, a call stack, and a "heap".
+The VM contains a map of constants, 1 register, an object stack, a call stack, and a memory arena.
 
 The register is referred to as the `temp` storage.
 
 The call stack gets new frames with each `call` and each loop in a `do_for` or `do_for_in`.
 
-The "heap" is just a `HashMap<usize, MutableObject>` to store dynamic data.
 
 ### Types
 
 #### Literals
 
-| Type in JBC | Type in Rust        |
-| ---         | ---                 |
-| Integer     | `i64`               |
-| Float       | `f64`               |
-| String      | `&[str]`            |
-| Bool        | `"true" \| "false"` |
-
-There are 2 truly internal types: `Func` and `MutablePtr`. `Func` is essentially used as more of a "label" to jumping between and forth.
-`MutablePtr` is a `usize` which points to an object in `VM.heap`.
+| Type in JBC | Type in Rust             |
+| ---         | ---                      | 
+| Integer     | `isize`                  |
+| Float       | `(isize, usize)`         |
+| String      | `&'static [u8]`          |
+| Bool        | `bool`                   |
+| Pointer     | `*mut &'static Object'`  |
+| List        | `*const Object, usize`   |
+| Iterator    | `(&'static Object, usize)`|
+| Nil         | -                        |
+ 
+There is 1 truly internal types: `Func`. `Func` is essentially used as more of a "label" to jumping between and forth.
 
 ### Operations
 
@@ -92,4 +108,11 @@ There are 2 truly internal types: `Func` and `MutablePtr`. `Func` is essentially
 | list_set     | Set an index of a list                | - | Object, List, Index |
 | push_range   | Push int literals from `x` to `y` by `z` | - | Ints: Start, End, Steps |
 | return_if_const | Return from function call with a const | Constant name | Bool |
-  
+| get_ptr      | Add a pointer to top object to stack     | | Any object |
+| read_ptr     | Read the value from a pointer            | | Pointer |
+| set_ptr      | Change the data at the pointer           | | Pointer, any object |
+| get_iter     | Get iterable object from list on stack   | | List |
+| iter_next    | Push current index and upcycle iterator  | | Iterator |
+| iter_prev    | Push current index and downcycle iterator| | Iterator |
+| iter_skip    | Skip n indeces of iterator               | | Iterator, Integer |
+| iter_current | Push current index                       | | Iterator |
