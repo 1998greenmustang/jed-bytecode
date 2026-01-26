@@ -24,7 +24,7 @@ There are also options, but they do nothing:
 
 To run examples with the built program:
 ```sh
-  jar run ./examples/helloworld.jed
+  jed run ./examples/helloworld.jed
 ```
 or with `cargo run`:
 ```sh
@@ -86,28 +86,28 @@ There is 1 truly internal types: `Func`. `Func` is essentially used as more of a
 
 | Operation | Description | Argument | Stack Arguments |
 | --- | --- | --- | --- |
-| bin_op       | Apply a binary operation on the top 2 | BinOp | 2 same-typed operands |
-| call         | Call a custom defined function        | Function name | Arguments (or not!) required of the function |
-| call_builtin | Call a builtin function (ie println)  | Function name | Arguments (or not!) required of the function |
-| push_lit     | Push a literal to the stack           | Literal | - |
-| push_name    | Push a stored local to the stack      | Variable name | - |
-| push_temp    | Push the `temp` storage to the stack  | - | - |
-| pop          | Pop the top element off the stack     | - | - |
+| bin_op       | Apply a binary operation on the top 2    | BinOp | 2 same-typed operands |
+| call         | Call a custom defined function           | Function name | Arguments (or not!) required of the function |
+| call_builtin | Call a builtin function (ie println)     | Function name | Arguments (or not!) required of the function |
+| push_lit     | Push a literal to the stack              | Literal | - |
+| push_name    | Push a stored local to the stack         | Variable name | - |
+| push_temp    | Push the `temp` storage to the stack     | - | - |
+| pop          | Pop the top element off the stack        | - | - |
 | return_if    | Return from function call if top element is true | Optional variable name | Bool |
-| store_const  | Store a constant with a name          | Variable name | Object to store |
-| store_name   | Store a variable with a name          | Variable name | Object to store |
-| store_temp   | Store an object to `temp` storage     | - | Object to store |
-| func         | Define a function                     | Function name, # of args | - |
+| store_const  | Store a constant with a name             | Variable name | Object to store |
+| store_name   | Store a variable with a name             | Variable name | Object to store |
+| store_temp   | Store an object to `temp` storage        | - | Object to store |
+| func         | Define a function                        | Function name, # of args | - |
 | done         | Closing delimited for `do_for` and funcs | - | Return value (if wanted) |
-| exit         | Stop and clear VM                     | - | - |
-| do_for       | Loop for `x` times                    | - | Positive integer |
-| do_for_in    | Loop for `len(LIST)` times            | Name of stored list | - |
-| create_list  | Create a list of the top `x` elements | Number of stack elements | The stack elements to use |
-| list_push    | Push onto a list                      | - | Object, List, Index |
-| list_get     | Get from a list                       | - | List, Index |
-| list_set     | Set an index of a list                | - | Object, List, Index |
+| exit         | Stop and clear VM                        | - | - |
+| do_for       | Loop for `x` times                       | - | Positive integer |
+| do_for_in    | Loop for `len(LIST)` times               | Name of stored list | - |
+| create_list  | Create a list of the top `x` elements    | Number of stack elements | The stack elements to use |
+| list_push    | Push onto a list                         | - | Object, List, Index |
+| list_get     | Get from a list                          | - | List, Index |
+| list_set     | Set an index of a list                   | - | Object, List, Index |
 | push_range   | Push int literals from `x` to `y` by `z` | - | Ints: Start, End, Steps |
-| return_if_const | Return from function call with a const | Constant name | Bool |
+| return_if_const | Return from function call with a const| Constant name | Bool |
 | get_ptr      | Add a pointer to top object to stack     | | Any object |
 | read_ptr     | Read the value from a pointer            | | Pointer |
 | set_ptr      | Change the data at the pointer           | | Pointer, any object |

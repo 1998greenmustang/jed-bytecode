@@ -1,5 +1,5 @@
 [package]
-name = "jar"
+name = "jed"
 version = "0.3.0"
 
 [lints.clippy]
