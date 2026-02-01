@@ -5,6 +5,7 @@ use crate::{
     builtin::BuiltIn,
     error::{ProgramError, ProgramErrorKind},
     frame::{Frame, FrameKind},
+    modules::{self, MODULES},
     object::{Object, ObjectData, ObjectKind},
     utils::{self, bytes_to_string},
     vm::VM,
@@ -43,6 +44,7 @@ pub enum Operation {
     IterPrev,
     IterSkip,
     IterCurrent,
+    Import(&'static [u8]),
     Empty,
 }
 
@@ -68,6 +70,7 @@ impl From<(u8, &'static [u8])> for Operation {
             10 => Operation::StoreName(value.1),
             16 => Operation::DoForIn(value.1),
             22 => Operation::ReturnIfConst(value.1),
+            31 => Operation::ReturnIfConst(value.1),
             _ => panic!(),
         }
     }
@@ -130,6 +133,7 @@ impl From<Operation> for u8 {
             Operation::IterPrev => 28,
             Operation::IterSkip => 29,
             Operation::IterCurrent => 30,
+            Operation::Import(_) => 31,
             Operation::Empty => todo!(),
         }
     }
@@ -139,21 +143,21 @@ impl Display for Operation {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Operation::BinOp(bin_op_kind) => write!(f, "bin_op {}", bin_op_kind),
-            Operation::Call(items) => write!(f, "call {}", bytes_to_string(items)),
+            Operation::Call(bytes) => write!(f, "call {}", bytes_to_string(bytes)),
             Operation::CallBuiltIn(built_in) => write!(f, "call_builtin {}", built_in),
-            Operation::PushLit(items) => write!(f, "push_lit {}", bytes_to_string(items)),
-            Operation::PushName(items) => write!(f, "push_name {}", bytes_to_string(items)),
+            Operation::PushLit(bytes) => write!(f, "push_lit {}", bytes_to_string(bytes)),
+            Operation::PushName(bytes) => write!(f, "push_name {}", bytes_to_string(bytes)),
             Operation::PushTemp => write!(f, "push_temp"),
             Operation::Pop => write!(f, "pop"),
-            Operation::ReturnIf(items) => write!(f, "return_if {}", bytes_to_string(items)),
-            Operation::StoreConst(items) => write!(f, "store_const {}", bytes_to_string(items)),
-            Operation::StoreName(items) => write!(f, "store_name {}", bytes_to_string(items)),
+            Operation::ReturnIf(bytes) => write!(f, "return_if {}", bytes_to_string(bytes)),
+            Operation::StoreConst(bytes) => write!(f, "store_const {}", bytes_to_string(bytes)),
+            Operation::StoreName(bytes) => write!(f, "store_name {}", bytes_to_string(bytes)),
             Operation::StoreTemp => write!(f, "store_temp"),
-            Operation::Func(items, arity) => write!(f, "func {} {arity}", bytes_to_string(items)),
+            Operation::Func(bytes, arity) => write!(f, "func {} {arity}", bytes_to_string(bytes)),
             Operation::Done => write!(f, "done"),
             Operation::Exit => write!(f, "exit"),
             Operation::DoFor => write!(f, "do_for"),
-            Operation::DoForIn(items) => write!(f, "do_for_in {}", bytes_to_string(items)),
+            Operation::DoForIn(bytes) => write!(f, "do_for_in {}", bytes_to_string(bytes)),
             Operation::CreateList(idx) => {
                 write!(f, "create_list {}", utils::unwrap_as_string_or(*idx, ""))
             }
@@ -165,8 +169,8 @@ impl Display for Operation {
                 write!(f, "list_set {}", utils::unwrap_as_string_or(*idx, ""))
             }
             Operation::PushRange => write!(f, "push_range"),
-            Operation::ReturnIfConst(items) => {
-                write!(f, "return_if_const {}", bytes_to_string(items))
+            Operation::ReturnIfConst(bytes) => {
+                write!(f, "return_if_const {}", bytes_to_string(bytes))
             }
             Operation::GetPtr => write!(f, "get_ptr"),
             Operation::ReadPtr => write!(f, "read_ptr"),
@@ -176,6 +180,7 @@ impl Display for Operation {
             Operation::IterPrev => write!(f, "iter_prev"),
             Operation::IterSkip => write!(f, "iter_skip"),
             Operation::IterCurrent => write!(f, "iter_current"),
+            Operation::Import(bytes) => write!(f, "import {}", bytes_to_string(bytes)),
             Operation::Empty => write!(f, ""),
         }
     }
@@ -214,6 +219,7 @@ impl Operation {
             "iter_prev" => true,
             "iter_skip" => true,
             "iter_current" => true,
+            "import" => true,
             _ => false,
         }
     }
@@ -250,6 +256,7 @@ impl Operation {
             "iter_prev" => 28,
             "iter_skip" => 29,
             "iter_current" => 30,
+            "import" => 30,
             _ => 0,
         }
     }
@@ -534,7 +541,7 @@ impl Operation {
                     panic!("No such name '{}'", utils::bytes_to_string(obj_name))
                 });
                 match obj_ptr.as_tuple() {
-                    (ObjectKind::List, ObjectData::List(start, len)) => {
+                    (ObjectKind::List, ObjectData::List(_start, len)) => {
                         let pc = vm.counter.clone();
                         for _ in 0..len {
                             let mut frame = Frame::new(pc, FrameKind::Loop);
@@ -547,6 +554,23 @@ impl Operation {
                             vm.call_stack.push(frame);
                         }
                     }
+                    (ObjectKind::Iterator, ObjectData::Iterator(list_ptr, _next)) => unsafe {
+                        let list = *list_ptr;
+                        if let ObjectData::List(_start, len) = list.data {
+                            let pc = vm.counter.clone();
+                            for _ in 0..len {
+                                let mut frame = Frame::new(pc, FrameKind::Loop);
+                                frame.copy_locals({
+                                    match vm.call_stack.last() {
+                                        Ok(ts) => Ok(ts),
+                                        Err(_) => vm.error(ProgramErrorKind::StackError(1)),
+                                    }
+                                }?);
+                                vm.call_stack.push(frame);
+                            }
+                        }
+                    },
+
                     (kind, _data) => {
                         return vm.error(ProgramErrorKind::TypeError(ObjectKind::List, kind))
                     }
@@ -825,9 +849,14 @@ impl Operation {
                     }
                 }?;
                 if let ObjectKind::List = list_obj.kind {
+                    let initial_index = Box::new(0);
+
                     let iter_obj = Object {
                         kind: ObjectKind::Iterator,
-                        data: ObjectData::Iterator(list_obj, 0 as *mut usize),
+                        data: ObjectData::Iterator(
+                            list_obj as *const Object,
+                            Box::into_raw(initial_index),
+                        ),
                     };
                     let iter_obj: &'static Object = vm.register_single(iter_obj);
                     vm.obj_stack.push(iter_obj);
@@ -836,42 +865,98 @@ impl Operation {
                 }
                 Ok(())
             }
-            Operation::IterNext => {
-                // let mut iter_obj = {
-                //     match { vm.obj_stack.pop_mut() } {
-                //         Ok(t) => Ok(t),
-                //         Err(_) => vm.error(ProgramErrorKind::StackError(1)),
-                //     }
-                // }?;
+            Operation::IterNext => unsafe {
+                let Object { kind, mut data } = {
+                    match { vm.obj_stack.pop_mut() } {
+                        Ok(&mut t) => Ok(t),
+                        Err(_) => vm.error(ProgramErrorKind::StackError(1)),
+                    }
+                }?;
 
-                // if let ObjectData::Iterator(list, mut current) = iter_obj.data {
-                //     if let ObjectData::List(start, len) = list.data {
-                //         let new_current = unsafe { current.read() } + 1;
-                //         if new_current < len {
-                //             current = new_current as *mut usize;
-                //             vm.obj_stack.push(unsafe { &start.add(new_current).read() });
-                //         } else {
-                //             return Ok(());
-                //         }
-                //     }
-                // } else {
-                //     return vm.error(ProgramErrorKind::TypeError(
-                //         ObjectKind::Iterator,
-                //         iter_obj.kind,
-                //     ));
-                // }
+                if let ObjectData::Iterator(list_ptr, ref mut next) = data {
+                    let list = *list_ptr;
+                    if let ObjectData::List(start, len) = list.data {
+                        vm.obj_stack.push(&*start.add(**next));
+                        if **next <= len {
+                            **next += 1;
+                        } else {
+                            return vm.error(ProgramErrorKind::IterNext(len));
+                        }
+                    }
+                } else {
+                    return vm.error(ProgramErrorKind::TypeError(ObjectKind::Iterator, *kind));
+                }
+
                 Ok(())
-            }
-            Operation::IterPrev => {
-                // TODO
+            },
+            Operation::IterPrev => unsafe {
+                let Object { kind, mut data } = {
+                    match { vm.obj_stack.pop_mut() } {
+                        Ok(&mut t) => Ok(t),
+                        Err(_) => vm.error(ProgramErrorKind::StackError(1)),
+                    }
+                }?;
+
+                if let ObjectData::Iterator(list_ptr, ref mut current) = data {
+                    let list = *list_ptr;
+                    if let ObjectData::List(start, len) = list.data {
+                        let cur_val = **current;
+                        if cur_val == len {
+                            **current -= 1;
+                            vm.obj_stack.push(&*start.add(**current));
+                        } else if cur_val == 0 {
+                            return vm.error(ProgramErrorKind::IterPrevious);
+                        } else {
+                            vm.obj_stack.push(&*start.add(**current));
+                            **current -= 1;
+                        }
+                    }
+                    // } else {
+                    return vm.error(ProgramErrorKind::TypeError(ObjectKind::Iterator, *kind));
+                }
                 Ok(())
-            }
+            },
             Operation::IterSkip => {
                 // TODO
                 Ok(())
             }
-            Operation::IterCurrent => {
-                // TODO
+            Operation::IterCurrent => unsafe {
+                let Object { kind, data } = {
+                    match { vm.obj_stack.pop_mut() } {
+                        Ok(&mut t) => Ok(t),
+                        Err(_) => vm.error(ProgramErrorKind::StackError(1)),
+                    }
+                }?;
+
+                if let ObjectData::Iterator(_list_ptr, next) = data {
+                    let val = if **next == 0 { 0 } else { (**next) - 1 };
+                    let obj = Object {
+                        kind: ObjectKind::Integer,
+                        data: ObjectData::Integer(val as isize),
+                    };
+                    let obj: &'static Object = vm.register_single(obj);
+                    vm.obj_stack.push(obj);
+                } else {
+                    return vm.error(ProgramErrorKind::TypeError(ObjectKind::Iterator, *kind));
+                }
+                Ok(())
+            },
+            Operation::Import(bytes) => {
+                // if MODULES.contains(bytes) {
+                //     if vm.debug {
+                //         println!(
+                //             "DEBUG: Using the internal module '{}'",
+                //             bytes_to_string(bytes)
+                //         );
+                //         println!("DEBUG: If this isn't what you meant to do, rename your module");
+                //     }
+                //     // wait this isnt anything
+                //     // ig if i do syscall things
+                //     // but
+                //     let module: &[Operation] = modules::get_module(bytes);
+                //     vm.program.import_module(module);
+                // } else {
+                // }
                 Ok(())
             }
             _ => todo!("{}", self),

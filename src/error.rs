@@ -2,7 +2,7 @@ use std::fmt::Display;
 
 use crate::{
     binops::BinOpKind,
-    object::{Object, ObjectData, ObjectKind},
+    object::{ObjectData, ObjectKind},
     span::Span,
     utils,
 };
@@ -18,8 +18,10 @@ pub enum ProgramErrorKind {
     ParsingError(String),
     Overflow(BinOpKind, isize, isize),
     IntegerToUnsigned,
-    ListIndexError(usize, usize),
+    ListIndexError(usize, usize), // index, length
     ConstantExists(&'static [u8]),
+    IterNext(usize), // index, length
+    IterPrevious,    // index, length
 }
 
 impl Display for ProgramErrorKind {
@@ -59,6 +61,10 @@ impl Display for ProgramErrorKind {
                 "index '{}' does not appear in a list of {} length",
                 idx, len
             ),
+            ProgramErrorKind::IterNext(len) => {
+                write!(f, "can not get next in a list of {} length", len)
+            }
+            ProgramErrorKind::IterPrevious => write!(f, "can not get previous",),
             ProgramErrorKind::ConstantExists(bytes) => todo!(),
         }
     }

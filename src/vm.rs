@@ -1,4 +1,4 @@
-use std::{collections::HashMap, fs::File, io, process::ExitCode};
+use std::{collections::HashMap, fs::File, io};
 
 use crate::{
     arena,
@@ -22,11 +22,12 @@ pub struct VM {
     pub temp: Option<&'static Object>,
     pub memory: arena::Manual<Object>,
     pub current_span: Span,
+    pub debug: bool,
 }
 
 impl VM {
     // TODO add "consts" so we don't to CONSTANTLY fresh new objects for the same literal
-    pub fn new(program: Program) -> Self {
+    pub fn new(program: Program, debug: bool) -> Self {
         let mut call_stack = Stack::new();
         call_stack.push(Frame::new(program.instructions.len(), FrameKind::Main));
         let main = program.get_main();
@@ -39,6 +40,7 @@ impl VM {
             temp: None,
             memory: Default::default(),
             current_span: Span::empty(),
+            debug,
         }
     }
 
@@ -68,13 +70,13 @@ impl VM {
         self.consts.get(name).map(|v| &**v)
     }
 
-    pub fn from_string(text: String) -> Self {
+    pub fn from_string(text: String, debug: bool) -> Self {
         let program = Program::from_string(text);
-        Self::new(program)
+        Self::new(program, debug)
     }
-    pub fn from_file(file: &mut File) -> io::Result<Self> {
+    pub fn from_file(file: &mut File, debug: bool) -> io::Result<Self> {
         let program = Program::from_file(file)?;
-        Ok(Self::new(program))
+        Ok(Self::new(program, debug))
     }
 
     pub fn run(&mut self) {

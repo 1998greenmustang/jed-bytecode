@@ -44,22 +44,18 @@ func main 0
 	push_lit "Buzz"
 	store_const buzz
 
-	push_lit 0
-	store_name i
+	push_name nums
+	get_iter
+	store_name nums_iter
 	do_for_in nums
-		push_name nums
-		push_name i
-		list_get
+		push_name nums_iter
+		iter_next
 		call fizzbuzz
-
+		
 		push_name nums
-		push_name i
+		push_name nums_iter
+		iter_current
 		list_set 
-
-		push_name i
-		push_lit 1
-		bin_op +
-		store_name i
 	done
 
 	push_name nums

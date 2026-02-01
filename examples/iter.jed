@@ -1,0 +1,29 @@
+func main 0
+	push_lit 5
+	push_lit 10
+	create_list 2
+
+	get_iter
+	store_name iterable
+
+	push_name iterable
+	iter_next
+	call_builtin println
+
+	push_name iterable
+	iter_next
+	call_builtin println
+	push_name iterable
+	iter_next
+	call_builtin println
+	
+	push_name iterable
+	iter_prev
+	call_builtin println
+
+	push_name iterable
+	iter_prev
+	call_builtin println
+
+
+exit

@@ -1,8 +1,3 @@
-use std::{
-    fs::File,
-    io::{self, Read},
-};
-
 use crate::error::ProgramErrorKind;
 
 pub fn bytes_to_string(bytes: &[u8]) -> String {
@@ -63,4 +58,8 @@ where
 
 pub fn isize_to_usize(i: isize) -> usize {
     unsafe { std::mem::transmute(i) }
+}
+
+pub fn bounded(min: usize, v: usize, max: usize) -> bool {
+    return v >= min && v <= max;
 }

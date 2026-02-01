@@ -1,6 +1,5 @@
 use std::{
     alloc::{self, Layout},
-    error::Error,
     ptr::{self, NonNull},
 };
 
@@ -76,7 +75,7 @@ impl<T> Stack<T> {
             return Err(ProgramErrorKind::StackError(1));
         }
         self.len -= 1;
-        Ok(unsafe { &mut *self.ptr.as_ptr().add(self.len - 1) })
+        Ok(unsafe { &mut *self.ptr.as_ptr().add(self.len) })
     }
 
     pub unsafe fn pop_n(&mut self, n: usize) -> Result<&[T], ProgramErrorKind> {

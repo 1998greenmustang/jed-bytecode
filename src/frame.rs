@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use crate::{map::Map, object::Object, program::MemoKey};
+use crate::{object::Object, program::MemoKey};
 
 #[derive(PartialEq, Eq, Debug)]
 pub enum FrameKind {

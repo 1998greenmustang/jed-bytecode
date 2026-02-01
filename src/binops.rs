@@ -1,7 +1,7 @@
 use std::fmt::Display;
 
 use crate::{
-    error::{ProgramError, ProgramErrorKind},
+    error::ProgramErrorKind,
     object::{Object, ObjectData},
 };
 

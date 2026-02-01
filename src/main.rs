@@ -6,6 +6,7 @@ mod error;
 mod frame;
 mod indexmap;
 mod map;
+mod modules;
 mod object;
 mod operation;
 mod program;
@@ -23,7 +24,7 @@ use program::Program;
 use vm::VM;
 
 const HELP: &str = "jed [COMMAND] [OPTIONS]";
-const MAGIC_NUMBER: &[u8] = "JED".as_bytes();
+const MAGIC_NUMBER: &[u8] = "jed".as_bytes();
 
 // jed commands:
 //  - compile (string -> bytecode)
@@ -117,13 +118,13 @@ fn main() -> io::Result<()> {
             let n = file.read(&mut magic_number_buffer)?;
             if n == 3 && magic_number_buffer == MAGIC_NUMBER {
                 file.seek(SeekFrom::Start(0))?;
-                let mut vm = VM::from_file(&mut file)?;
+                let mut vm = VM::from_file(&mut file, opts.debug)?;
                 vm.run();
             } else {
                 file.seek(SeekFrom::Start(0))?;
                 let mut string = String::new();
                 file.read_to_string(&mut string)?;
-                let mut vm = VM::from_string(string);
+                let mut vm = VM::from_string(string, opts.debug);
                 vm.run();
             }
         }

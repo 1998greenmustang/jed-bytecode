@@ -1,16 +1,14 @@
 use std::{
     collections::{BTreeMap, HashMap},
-    convert::TryInto,
     fs::File,
-    io::{self, Read, Write},
+    io::{self, BufReader, Read, Write},
 };
 
-use crate::{arena::Dropless, object::Object, operation::Operation, utils};
+use crate::{arena::Dropless, object::Object, operation::Operation, utils, MAGIC_NUMBER};
 
 type Arity = usize;
 type Index = usize;
 
-const MAGIC_NUMBER: &[u8] = r"JED".as_bytes();
 pub type MemoKey = (Index, &'static [Object]);
 type MemoTable = HashMap<MemoKey, Object>;
 
@@ -101,6 +99,7 @@ impl Program {
                 | Operation::PushLit(items)
                 | Operation::PushName(items)
                 | Operation::ReturnIf(items)
+                | Operation::ReturnIfConst(items)
                 | Operation::StoreConst(items)
                 | Operation::StoreName(items)
                 | Operation::DoForIn(items) => {
@@ -150,13 +149,15 @@ impl Program {
     /// ]
     /// Spans will be added later for error reporting
     pub fn from_file(file: &mut File) -> io::Result<Self> {
+        let mut reader = BufReader::new(file);
         let mut program = Self::new();
         let mut magic_number: [u8; 3] = [0; 3];
-        file.read(&mut magic_number[..])?;
-        assert_eq!(magic_number, MAGIC_NUMBER);
+        reader.read(&mut magic_number[..])?;
+        assert_eq!(magic_number, MAGIC_NUMBER, "not a jed file");
         let mut op_buffer: [u8; 1] = [0; 1];
         loop {
-            let n = file.read(&mut op_buffer[..])?;
+            let n = reader.read(&mut op_buffer[..])?;
+            // println!("buf: {:?} ({})", op_buffer, n);
             if n != 1 {
                 break;
             }
@@ -166,7 +167,7 @@ impl Program {
                 // in file: u8
                 1 => {
                     let mut binopbuffer: [u8; 1] = [0; 1];
-                    file.read(&mut binopbuffer[..])?;
+                    reader.read(&mut binopbuffer[..])?;
                     program
                         .instructions
                         .push(Operation::BinOp(binopbuffer[0].into()))
@@ -176,7 +177,7 @@ impl Program {
                 // in file: u8
                 3 => {
                     let mut builtinbuffer: [u8; 1] = [0; 1];
-                    file.read(&mut builtinbuffer[..])?;
+                    reader.read(&mut builtinbuffer[..])?;
                     program
                         .instructions
                         .push(Operation::CallBuiltIn(builtinbuffer[0].into()))
@@ -187,12 +188,13 @@ impl Program {
                 // in file: usize (length), [u8; length]
                 2 | 4 | 5 | 8 | 9 | 10 | 16 | 22 => {
                     let mut slice_length: [u8; size_of::<usize>()] = [0; size_of::<usize>()];
-                    let n = file.read(&mut slice_length[..])?;
+                    let n = reader.read(&mut slice_length[..])?;
                     assert_eq!(n, size_of::<usize>(), "did not receive enough data");
                     let slice_length: usize = usize::from_be_bytes(slice_length);
+                    println!("slice_length {}", slice_length);
 
                     let mut args: Vec<u8> = vec![0; slice_length];
-                    let n = file.read(&mut args)?;
+                    let n = reader.read(&mut args)?;
                     assert_eq!(n, slice_length, "did not receive enough data");
                     let args = program.register_bytes(&args);
 
@@ -204,12 +206,12 @@ impl Program {
                 // in file: Bool, usize
                 17 | 19 | 20 => {
                     let mut boolean: [u8; 1] = [0; 1];
-                    let n = file.read(&mut boolean[..])?;
+                    let n = reader.read(&mut boolean[..])?;
                     assert_eq!(n, 1, "did not receive enough data");
                     let boolean: bool = unsafe { std::mem::transmute(boolean) };
                     if boolean {
                         let mut number: [u8; size_of::<usize>()] = [0; size_of::<usize>()];
-                        let n = file.read(&mut number[..])?;
+                        let n = reader.read(&mut number[..])?;
                         assert_eq!(n, size_of::<usize>(), "did not receive enough data");
                         let number: usize = usize::from_be_bytes(number);
                         program
@@ -224,17 +226,17 @@ impl Program {
                 // in file: usize (length), [u8; length]
                 12 => {
                     let mut slice_length: [u8; size_of::<usize>()] = [0; size_of::<usize>()];
-                    let n = file.read(&mut slice_length[..])?;
+                    let n = reader.read(&mut slice_length[..])?;
                     assert_eq!(n, size_of::<usize>(), "did not receive enough data");
                     let slice_length: usize = usize::from_be_bytes(slice_length);
 
                     let mut name: Vec<u8> = vec![0; slice_length];
-                    let n = file.read(&mut name)?;
+                    let n = reader.read(&mut name)?;
                     assert_eq!(n, slice_length, "did not receive enough data");
                     let name = program.register_bytes(&name);
 
                     let mut arity: [u8; size_of::<usize>()] = [0; size_of::<usize>()];
-                    let n = file.read(&mut arity[..])?;
+                    let n = reader.read(&mut arity[..])?;
                     assert_eq!(n, size_of::<usize>(), "did not receive enough data");
                     let arity: usize = usize::from_be_bytes(arity);
 
@@ -325,4 +327,20 @@ impl Program {
         }
         return program;
     }
+
+    // pub fn import_module(&mut self, other: &mut Program) {
+    //     // update: vm.program.instructions, vm.program.funcs, vm.program.string_arena, vm.program.saved_strings
+    //     let length_of_other = other.instructions.len();
+    //     self.instructions.append(&mut other.instructions);
+
+    //     for (_name, tpl) in self.funcs.iter_mut() {
+    //         tpl.0 += length_of_other;
+    //     }
+    //     self.funcs.append(&mut other.funcs);
+
+    //     for (string, _) in other.saved_strings.clone() {
+    //         other.register(string);
+    //     }
+    //     drop(other);
+    // }
 }

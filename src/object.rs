@@ -53,7 +53,7 @@ pub enum ObjectData {
     Func(&'static [u8]),
     List(*const Object, usize), // start, end
     Pointer(*mut &'static Object),
-    Iterator(&'static Object, *mut usize), // internal list, current
+    Iterator(*const Object, *mut usize), // start, next
     Nil,
 }
 
@@ -77,7 +77,7 @@ impl Debug for ObjectData {
             ObjectData::Pointer(pr) => write!(f, "ptr ({pr:p})"),
             ObjectData::Nil => write!(f, "Nil"),
             ObjectData::List(start, len) => write!(f, "list (@{start:p}, {len})"),
-            ObjectData::Iterator(list, current) => todo!(),
+            ObjectData::Iterator(list, next) => todo!(),
         }
     }
 }
@@ -105,9 +105,7 @@ impl Display for ObjectData {
                 }
                 write!(f, "]")
             },
-            ObjectData::Iterator(list, current) => unsafe {
-                write!(f, "{} iterator at {}", list, current.read())
-            },
+            ObjectData::Iterator(list_ptr, next) => unsafe { write!(f, "<iterator>",) },
         }
     }
 }
