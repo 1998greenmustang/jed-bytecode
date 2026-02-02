@@ -45,7 +45,10 @@ impl Program {
         return *idx;
     }
     pub fn get_op(&self, idx: usize) -> &Operation {
-        self.instructions.get(idx).unwrap()
+        match self.instructions.get(idx) {
+            Some(op) => op,
+            None => &Operation::Exit,
+        }
     }
 
     pub fn register_bytes(&mut self, byte_str: &[u8]) -> &'static [u8] {
@@ -320,6 +323,7 @@ impl Program {
                 28 => Operation::IterPrev,
                 29 => Operation::IterSkip,
                 30 => Operation::IterCurrent,
+                31 => Operation::Iterate,
 
                 0 | _ => panic!("No such operation '{}'", op),
             };

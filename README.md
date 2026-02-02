@@ -47,6 +47,8 @@ So, I made a very simple AST crawler runtime that was very annoying. So I wanted
 
 That's what this project is. This is not to replace any other backend, it's for my own exploration of what languages are.
 
+However, since this a love project of mine, there are plenty of times where this is actually faster than CPython.
+
 ## The Language
 
 I am a Python developer by trade, so I _tried_ to take some inspiration from its bytecode. 
@@ -116,3 +118,4 @@ There is 1 truly internal types: `Func`. `Func` is essentially used as more of a
 | iter_prev    | Push current index and downcycle iterator| | Iterator |
 | iter_skip    | Skip n indeces of iterator               | | Iterator, Integer |
 | iter_current | Push current index                       | | Iterator |
+| iterate      | Iterate through an iterator on the stack | | Iterator |

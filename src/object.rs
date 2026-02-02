@@ -77,7 +77,9 @@ impl Debug for ObjectData {
             ObjectData::Pointer(pr) => write!(f, "ptr ({pr:p})"),
             ObjectData::Nil => write!(f, "Nil"),
             ObjectData::List(start, len) => write!(f, "list (@{start:p}, {len})"),
-            ObjectData::Iterator(list, next) => todo!(),
+            ObjectData::Iterator(list, next) => unsafe {
+                write!(f, "iterate (@{list:p}, next: {})", **next)
+            },
         }
     }
 }

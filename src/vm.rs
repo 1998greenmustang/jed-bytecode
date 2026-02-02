@@ -26,7 +26,6 @@ pub struct VM {
 }
 
 impl VM {
-    // TODO add "consts" so we don't to CONSTANTLY fresh new objects for the same literal
     pub fn new(program: Program, debug: bool) -> Self {
         let mut call_stack = Stack::new();
         call_stack.push(Frame::new(program.instructions.len(), FrameKind::Main));
@@ -113,13 +112,60 @@ impl VM {
             }
 
             if let Operation::Exit = self.program.get_op(self.counter) {
-                self.counter = self.program.get_main();
-                self.obj_stack = Stack::new();
-                self.call_stack = Stack::new();
-                self.program.memos.clear();
                 return;
             }
         }
+    }
+
+    pub fn run_block(&mut self) {
+        loop {
+            self.update_span();
+            if self.counter == self.program.instructions.len() - 1 {
+                return;
+            }
+            if self.call_stack.len() > 100_000 {
+                panic!("call stack overflow");
+            }
+            if self.obj_stack.len() > 1_000_000 {
+                unsafe {
+                    panic!(
+                        "object stack overflow, {:?}",
+                        self.obj_stack
+                            .last_n(10)
+                            .iter()
+                            .map(|x| format!("{:?}", x))
+                            .collect::<Vec<String>>()
+                    )
+                }
+            }
+            let op = self.next();
+            let res = op.unwrap().call(self);
+
+            match res {
+                Ok(_) => {}
+                Err(e) => {
+                    println!("\nruntime failure:\n{}", e);
+                    std::process::exit(1);
+                }
+            }
+
+            if let Ok(frame) = self.call_stack.last() {
+                let op = self.program.get_op(self.counter);
+                match (frame.kind.clone(), op) {
+                    (FrameKind::Loop, Operation::Done) => return,
+                    (FrameKind::Loop, Operation::Exit) => return,
+                    _ => (),
+                }
+            }
+        }
+    }
+
+    pub fn exit(&mut self, code: Option<i32>) {
+        self.counter = self.program.get_main();
+        self.obj_stack = Stack::new();
+        self.call_stack = Stack::new();
+        self.program.memos.clear();
+        std::process::exit(code.unwrap_or_default());
     }
 
     fn update_span(&mut self) {
@@ -218,6 +264,19 @@ impl VM {
 
     pub fn error<T>(&self, e: ProgramErrorKind) -> Result<T, ProgramError> {
         match e {
+            ProgramErrorKind::VariableExists(_) => {
+                match self.call_stack.last().cloned() {
+                    Ok(frame) => println!(
+                        "current variables: {:?}",
+                        frame
+                            .locals
+                            .into_keys()
+                            .map(|x| utils::bytes_to_string(x))
+                            .collect::<Vec<String>>()
+                    ),
+                    Err(_) => todo!(),
+                };
+            }
             ProgramErrorKind::StackError(_) => unsafe {
                 println!(
                     "call stack: {:?}",

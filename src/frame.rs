@@ -2,17 +2,17 @@ use std::collections::BTreeMap;
 
 use crate::{object::Object, program::MemoKey};
 
-#[derive(PartialEq, Eq, Debug)]
+#[derive(PartialEq, Eq, Debug, Clone)]
 pub enum FrameKind {
     Loop,
     Call,
     Main,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Frame {
     // String -> Literal
-    locals: BTreeMap<&'static [u8], &'static Object>,
+    pub locals: BTreeMap<&'static [u8], &'static Object>,
     pub return_address: usize,
     pub memo_key: MemoKey,
     pub kind: FrameKind,

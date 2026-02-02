@@ -7,6 +7,7 @@ use crate::{
     frame::{Frame, FrameKind},
     modules::{self, MODULES},
     object::{Object, ObjectData, ObjectKind},
+    stack::Stack,
     utils::{self, bytes_to_string},
     vm::VM,
 };
@@ -44,6 +45,7 @@ pub enum Operation {
     IterPrev,
     IterSkip,
     IterCurrent,
+    Iterate,
     Import(&'static [u8]),
     Empty,
 }
@@ -133,7 +135,8 @@ impl From<Operation> for u8 {
             Operation::IterPrev => 28,
             Operation::IterSkip => 29,
             Operation::IterCurrent => 30,
-            Operation::Import(_) => 31,
+            Operation::Iterate => 31,
+            Operation::Import(_) => 32,
             Operation::Empty => todo!(),
         }
     }
@@ -180,6 +183,7 @@ impl Display for Operation {
             Operation::IterPrev => write!(f, "iter_prev"),
             Operation::IterSkip => write!(f, "iter_skip"),
             Operation::IterCurrent => write!(f, "iter_current"),
+            Operation::Iterate => write!(f, "iterate"),
             Operation::Import(bytes) => write!(f, "import {}", bytes_to_string(bytes)),
             Operation::Empty => write!(f, ""),
         }
@@ -219,6 +223,7 @@ impl Operation {
             "iter_prev" => true,
             "iter_skip" => true,
             "iter_current" => true,
+            "iterate" => true,
             "import" => true,
             _ => false,
         }
@@ -256,7 +261,8 @@ impl Operation {
             "iter_prev" => 28,
             "iter_skip" => 29,
             "iter_current" => 30,
-            "import" => 30,
+            "iterate" => 31,
+            "import" => 32,
             _ => 0,
         }
     }
@@ -370,6 +376,7 @@ impl Operation {
                         Err(_) => vm.error(ProgramErrorKind::StackError(1)),
                     }
                 }?;
+                // println!("{:?}", frame.locals);
                 let item = {
                     let option = frame.get_local(name);
                     let kind = ProgramErrorKind::VariableExists(name);
@@ -488,14 +495,11 @@ impl Operation {
                             }
                         }
                     }
-                    FrameKind::Main => todo!(),
+                    FrameKind::Main => vm.exit(Some(0)),
                 }
                 Ok(())
             }
-            Operation::Exit => {
-                // println!("i have been called");
-                std::process::exit(0);
-            }
+            Operation::Exit => Ok(vm.exit(Some(0))),
             Operation::CallBuiltIn(built_in) => {
                 let obj = {
                     match { vm.obj_stack.pop() } {
@@ -507,7 +511,6 @@ impl Operation {
                 Ok(())
             }
             Operation::DoFor => {
-                // TODO let done work with this
                 let object = {
                     match { vm.obj_stack.pop() } {
                         Ok(t) => Ok(t),
@@ -516,15 +519,16 @@ impl Operation {
                 }?;
                 if let ObjectData::Integer(times) = object.data {
                     let pc = vm.counter.clone();
+                    let last_frame = match vm.call_stack.last() {
+                        Ok(it) => it,
+                        Err(err) => vm.error(err)?,
+                    };
+                    let mut new_frame = Frame::new(pc, FrameKind::Loop);
+                    new_frame.copy_locals(last_frame);
+                    vm.call_stack.push(new_frame);
                     for _ in 0..times {
-                        let mut frame = Frame::new(pc, FrameKind::Loop);
-                        frame.copy_locals({
-                            match vm.call_stack.last() {
-                                Ok(ts) => Ok(ts),
-                                Err(e) => vm.error(e),
-                            }
-                        }?);
-                        vm.call_stack.push(frame);
+                        vm.counter = pc;
+                        vm.run_block();
                     }
                 }
                 Ok(())
@@ -540,33 +544,23 @@ impl Operation {
                 let obj_ptr = maybe_obj_ptr.unwrap_or_else(|| {
                     panic!("No such name '{}'", utils::bytes_to_string(obj_name))
                 });
+                let pc = vm.counter.clone();
+                let mut new_frame = Frame::new(pc, FrameKind::Loop);
+                new_frame.copy_locals(current_frame);
+                vm.call_stack.push(new_frame);
                 match obj_ptr.as_tuple() {
                     (ObjectKind::List, ObjectData::List(_start, len)) => {
-                        let pc = vm.counter.clone();
                         for _ in 0..len {
-                            let mut frame = Frame::new(pc, FrameKind::Loop);
-                            frame.copy_locals({
-                                match vm.call_stack.last() {
-                                    Ok(ts) => Ok(ts),
-                                    Err(_) => vm.error(ProgramErrorKind::StackError(1)),
-                                }
-                            }?);
-                            vm.call_stack.push(frame);
+                            vm.counter = pc;
+                            vm.run_block();
                         }
                     }
                     (ObjectKind::Iterator, ObjectData::Iterator(list_ptr, _next)) => unsafe {
                         let list = *list_ptr;
                         if let ObjectData::List(_start, len) = list.data {
-                            let pc = vm.counter.clone();
                             for _ in 0..len {
-                                let mut frame = Frame::new(pc, FrameKind::Loop);
-                                frame.copy_locals({
-                                    match vm.call_stack.last() {
-                                        Ok(ts) => Ok(ts),
-                                        Err(_) => vm.error(ProgramErrorKind::StackError(1)),
-                                    }
-                                }?);
-                                vm.call_stack.push(frame);
+                                vm.counter = pc;
+                                vm.run_block();
                             }
                         }
                     },
@@ -938,6 +932,37 @@ impl Operation {
                     vm.obj_stack.push(obj);
                 } else {
                     return vm.error(ProgramErrorKind::TypeError(ObjectKind::Iterator, *kind));
+                }
+                Ok(())
+            },
+            Operation::Iterate => unsafe {
+                let Object { kind, data } = {
+                    match { vm.obj_stack.pop_mut() } {
+                        Ok(&mut t) => Ok(t),
+                        Err(_) => vm.error(ProgramErrorKind::StackError(1)),
+                    }
+                }?;
+                if let ObjectData::Iterator(list_ptr, next) = data {
+                    let list = **list_ptr;
+                    if let ObjectData::List(start, len) = list.data {
+                        let pc = vm.counter.clone();
+                        let last_frame = match vm.call_stack.last() {
+                            Ok(it) => it,
+                            Err(err) => vm.error(err)?,
+                        };
+                        let mut new_frame = Frame::new(pc, FrameKind::Loop);
+                        new_frame.copy_locals(last_frame);
+                        vm.call_stack.push(new_frame);
+
+                        for n in (**next)..len {
+                            **next = n + 1;
+                            vm.counter = pc;
+                            vm.obj_stack.push(&*start.add(n));
+                            vm.run_block();
+                        }
+                    }
+                } else {
+                    vm.error(ProgramErrorKind::TypeError(ObjectKind::Iterator, *kind))?
                 }
                 Ok(())
             },
