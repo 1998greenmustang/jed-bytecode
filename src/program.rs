@@ -254,9 +254,8 @@ impl Program {
                 // push_temp, pop, store_temp, done, exit, do_for, list_push, push_range,
                 // get_ptr, read_ptr, set_ptr, get_iter, iter_next, iter_prev, iter_skip,
                 // iter_current
-                6 | 7 | 11 | 13 | 14 | 15 | 18 | 21 | 23 | 24 | 25 | 26 | 27 | 28 | 29 | 30 => {
-                    program.instructions.push(op_buffer[0].into())
-                }
+                6 | 7 | 11 | 13 | 14 | 15 | 18 | 21 | 23 | 24 | 25 | 26 | 27 | 28 | 29 | 30
+                | 31 => program.instructions.push(op_buffer[0].into()),
                 _ => break,
             }
         }
