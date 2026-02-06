@@ -255,7 +255,7 @@ impl Program {
                 // get_ptr, read_ptr, set_ptr, get_iter, iter_next, iter_prev, iter_skip,
                 // iter_current
                 6 | 7 | 11 | 13 | 14 | 15 | 18 | 21 | 23 | 24 | 25 | 26 | 27 | 28 | 29 | 30
-                | 31 => program.instructions.push(op_buffer[0].into()),
+                | 31 | 32 => program.instructions.push(op_buffer[0].into()),
                 _ => break,
             }
         }
@@ -323,6 +323,7 @@ impl Program {
                 29 => Operation::IterSkip,
                 30 => Operation::IterCurrent,
                 31 => Operation::Iterate,
+                32 => Operation::DoIf,
 
                 0 | _ => panic!("No such operation '{}'", op),
             };

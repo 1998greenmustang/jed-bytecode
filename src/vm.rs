@@ -59,6 +59,14 @@ impl VM {
             std::alloc::Layout::for_value(obj),
         );
     }
+    pub fn drop_list(&mut self, start: *const Object, len: usize) -> &[Object] {
+        let size = size_of::<Object>() * len;
+        self.memory.deallocate(
+            start as *mut Object,
+            std::alloc::Layout::from_size_align(size, align_of::<Object>()).expect("a"),
+        );
+        return &[];
+    }
 
     pub fn store_const(&mut self, name: &'static [u8], obj: Object) {
         let obj: &'static Object = self.register_single(obj);
@@ -240,6 +248,8 @@ impl VM {
             BinOpKind::Greater => binops::greater(lhs, rhs),
             BinOpKind::And => binops::and(lhs, rhs),
             BinOpKind::Or => binops::or(lhs, rhs),
+            BinOpKind::Power => binops::pow(lhs, rhs),
+            BinOpKind::Root => binops::root(lhs, rhs),
         };
 
         match result {

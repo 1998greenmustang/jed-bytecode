@@ -6,13 +6,8 @@ use std::{
 
 use crate::utils;
 
-#[derive(PartialEq, Debug)]
-// pub enum Object<'a> {
-//     Literal(&'a Literal),
-//     Func(usize), // usize => instruction pointer
-// }
 #[repr(u8)]
-#[derive(Hash, Eq, Copy, Clone, PartialOrd, Ord)]
+#[derive(Debug, Hash, Eq, PartialEq, Copy, Clone, PartialOrd, Ord)]
 pub enum ObjectKind {
     Integer,
     Float,
@@ -46,14 +41,14 @@ pub struct Object {
 #[derive(Hash, PartialEq, Eq, Copy, Clone, PartialOrd, Ord)]
 pub enum ObjectData {
     Integer(isize),
-    Float(isize, usize),
+    Float(i32, u32),
     UnsignedInt(usize),
     String(&'static [u8]),
     Bool(bool),
     Func(&'static [u8]),
-    List(*const Object, usize), // start, end
+    List(*mut usize, *mut usize), // *mut usize), // pointer address to the starting object, end, allocated TODO
     Pointer(*mut &'static Object),
-    Iterator(*const Object, *mut usize), // start, next
+    Iterator(*const ObjectData, *mut usize), // start, next
     Nil,
 }
 
@@ -76,9 +71,11 @@ impl Debug for ObjectData {
             ObjectData::Func(items) => write!(f, "func ({})", utils::bytes_to_string(items)),
             ObjectData::Pointer(pr) => write!(f, "ptr ({pr:p})"),
             ObjectData::Nil => write!(f, "Nil"),
-            ObjectData::List(start, len) => write!(f, "list (@{start:p}, {len})"),
+            ObjectData::List(start, len) => unsafe {
+                write!(f, "list (@{:p}, {})", **start as *const Object, **len)
+            },
             ObjectData::Iterator(list, next) => unsafe {
-                write!(f, "iterate (@{list:p}, next: {})", **next)
+                write!(f, "iterate (@{:?}, next: {:?})", list, next)
             },
         }
     }
@@ -96,12 +93,13 @@ impl Display for ObjectData {
             ObjectData::Nil => write!(f, "Nil"),
             ObjectData::UnsignedInt(_) => todo!(),
             ObjectData::List(start, len) => unsafe {
+                let start = **start as *const Object;
                 write!(f, "[")?;
-                for idx in 0..*len {
+                for idx in 0..**len {
                     let addr = start.add(idx);
                     write!(f, "{}", (addr as *const Object).read())?;
 
-                    if idx < len - 1 {
+                    if idx < (**len) - 1 {
                         write!(f, ",")?
                     }
                 }
@@ -164,8 +162,8 @@ impl From<isize> for Object {
     }
 }
 
-impl From<(isize, usize)> for Object {
-    fn from(value: (isize, usize)) -> Self {
+impl From<(i32, u32)> for Object {
+    fn from(value: (i32, u32)) -> Self {
         Object {
             kind: ObjectKind::Float,
             data: ObjectData::Float(value.0, value.1),

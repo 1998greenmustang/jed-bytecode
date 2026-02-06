@@ -1,0 +1,80 @@
+func main 0
+	push_lit 31
+	store_name n
+
+	push_lit 1
+	push_name n
+	push_lit 1
+	push_range
+	create_list
+	store_name prime
+
+	push_name prime
+	get_iter
+	store_name prime_iter
+	push_name prime_iter
+	iterate
+		pop
+		push_lit true
+		push_name prime
+		push_name prime_iter
+		iter_current
+		list_set
+	done
+
+
+	push_lit 2
+	push_lit 2
+	store_name i
+	
+	push_name n
+	call_builtin sqrt
+	push_lit 1
+	bin_op +
+	
+	do_for
+		push_name prime
+		push_name i
+		list_get
+		do_if
+			push_name i
+			push_name i
+			bin_op *
+			push_name n
+			push_lit 1
+			bin_op -
+			push_name i
+			push_range
+			create_list
+			get_iter
+			iterate
+				store_temp
+				push_lit false
+				push_name prime
+				push_temp
+				list_set
+			done
+		done
+
+		push_name prime
+		call_builtin println
+
+		push_name i
+		push_lit 1
+		bin_op +
+		store_name i
+	done
+
+	push_name prime
+	get_iter
+	store_temp 
+	push_temp 
+	iterate
+		do_if
+			push_temp 
+			iter_current
+			call_builtin println
+		done
+	done
+
+exit

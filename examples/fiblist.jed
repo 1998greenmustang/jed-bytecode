@@ -26,7 +26,6 @@ func main 0
 	push_range
 	create_list 92
 	store_name nums
-
 	push_lit 0
 	store_name i
 	do_for_in nums
@@ -34,10 +33,14 @@ func main 0
 		push_name i
 		list_get
 		call fib
+		push_lit "get"
+		call_builtin println
 
 		push_name nums
 		push_name i
 		list_set
+		push_lit "set"
+		call_builtin println
 			
 		push_name i
 		push_lit 1

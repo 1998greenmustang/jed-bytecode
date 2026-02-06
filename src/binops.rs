@@ -1,4 +1,4 @@
-use std::fmt::Display;
+use std::{convert::TryInto, fmt::Display};
 
 use crate::{
     error::ProgramErrorKind,
@@ -21,6 +21,9 @@ pub enum BinOpKind {
     Greater,
     And,
     Or,
+
+    Power,
+    Root,
 }
 
 impl Display for BinOpKind {
@@ -38,6 +41,8 @@ impl Display for BinOpKind {
             BinOpKind::Greater => write!(f, ">"),
             BinOpKind::And => write!(f, "&&"),
             BinOpKind::Or => write!(f, "||"),
+            BinOpKind::Power => write!(f, "pow"),
+            BinOpKind::Root => write!(f, "root"),
         }
     }
 }
@@ -57,6 +62,8 @@ impl From<&str> for BinOpKind {
             "%" => BinOpKind::Mod,
             "&&" => BinOpKind::And,
             "||" => BinOpKind::Or,
+            "pow" => BinOpKind::Power,
+            "root" => BinOpKind::Root,
             _ => panic!("Binary operator not implemented: '{}'", value),
         }
     }
@@ -78,12 +85,13 @@ pub fn add(lhs: ObjectData, rhs: ObjectData) -> Result<Object, ProgramErrorKind>
         (ObjectData::Float(_, _), ObjectData::Float(_, _)) => todo!(),
         (ObjectData::Float(_, _), ObjectData::Integer(_)) => return add(rhs, lhs),
         (ObjectData::Integer(left), ObjectData::Float(rightw, leftp)) => {
+            let rightw: isize = rightw.try_into().unwrap();
             let whole: isize = match left.checked_add(rightw) {
                 Some(w) => w,
                 None => return Err(ProgramErrorKind::Overflow(BinOpKind::Add, left, rightw)),
             };
-            let prec: usize = leftp;
-            return Ok((whole, prec).into());
+            let prec: u32 = leftp;
+            return Ok((whole.try_into().unwrap(), prec).into());
         }
         (ObjectData::String(_), ObjectData::String(_)) => todo!(),
         _ => Err(ProgramErrorKind::BinopError(BinOpKind::Add, lhs, rhs)),
@@ -102,7 +110,10 @@ pub fn sub(lhs: ObjectData, rhs: ObjectData) -> Result<Object, ProgramErrorKind>
 }
 pub fn mul(lhs: ObjectData, rhs: ObjectData) -> Result<Object, ProgramErrorKind> {
     match (lhs, rhs) {
-        (ObjectData::Integer(_), ObjectData::Integer(_)) => todo!(),
+        (ObjectData::Integer(left), ObjectData::Integer(right)) => match left.checked_mul(right) {
+            Some(v) => Ok(v.into()),
+            None => Err(ProgramErrorKind::Overflow(BinOpKind::Mul, left, right)),
+        },
         (ObjectData::Float(_, _), ObjectData::Float(_, _)) => todo!(),
         _ => Err(ProgramErrorKind::BinopError(BinOpKind::Mul, lhs, rhs)),
     }
@@ -164,7 +175,27 @@ pub fn and(lhs: ObjectData, rhs: ObjectData) -> Result<Object, ProgramErrorKind>
 }
 pub fn or(lhs: ObjectData, rhs: ObjectData) -> Result<Object, ProgramErrorKind> {
     match (lhs, rhs) {
-        (ObjectData::Integer(_), ObjectData::Integer(_)) => todo!(),
+        (ObjectData::Bool(left), ObjectData::Bool(right)) => Ok((left || right).into()),
+        _ => Err(ProgramErrorKind::BinopError(BinOpKind::Or, lhs, rhs)),
+    }
+}
+
+pub fn pow(lhs: ObjectData, rhs: ObjectData) -> Result<Object, ProgramErrorKind> {
+    match (lhs, rhs) {
+        (ObjectData::Integer(left), ObjectData::Integer(right)) => {
+            Ok(left.pow(right.try_into().expect("no")).into())
+        }
+        (ObjectData::Float(_, _), ObjectData::Float(_, _)) => todo!(),
+        _ => Err(ProgramErrorKind::BinopError(BinOpKind::Or, lhs, rhs)),
+    }
+}
+
+pub fn root(lhs: ObjectData, rhs: ObjectData) -> Result<Object, ProgramErrorKind> {
+    match (lhs, rhs) {
+        (ObjectData::Integer(left), ObjectData::Integer(right)) => {
+            println!("root(int, int): do not use");
+            Ok(left.pow((1 / right).try_into().expect("no")).into())
+        }
         (ObjectData::Float(_, _), ObjectData::Float(_, _)) => todo!(),
         _ => Err(ProgramErrorKind::BinopError(BinOpKind::Or, lhs, rhs)),
     }

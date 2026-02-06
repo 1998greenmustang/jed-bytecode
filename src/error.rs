@@ -22,6 +22,7 @@ pub enum ProgramErrorKind {
     ConstantExists(&'static [u8]),
     IterNext(usize), // index, length
     IterPrevious,    // index, length
+    TodoError,
 }
 
 impl Display for ProgramErrorKind {
@@ -66,6 +67,9 @@ impl Display for ProgramErrorKind {
             }
             ProgramErrorKind::IterPrevious => write!(f, "can not get previous",),
             ProgramErrorKind::ConstantExists(bytes) => todo!(),
+            ProgramErrorKind::TodoError => {
+                write!(f, "there is an error here, but im not sure what it is")
+            }
         }
     }
 }

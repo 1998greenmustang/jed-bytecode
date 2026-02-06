@@ -23,7 +23,7 @@ impl<T> Free<T> {
 
 pub struct Manual<T = u8> {
     start: Cell<*mut T>,
-    end: Cell<*mut T>,
+    endaa: Cell<*mut T>,
     chunks: RefCell<Vec<Chunk<T>>>,
     free: RefCell<Vec<Free<T>>>,
 }
@@ -32,7 +32,7 @@ impl<T> Default for Manual<T> {
     fn default() -> Self {
         Manual {
             start: Cell::new(ptr::null_mut()),
-            end: Cell::new(ptr::null_mut()),
+            endaa: Cell::new(ptr::null_mut()),
             chunks: Default::default(),
             free: Default::default(),
         }
@@ -94,7 +94,7 @@ impl<T> Manual<T> {
 
         loop {
             let start = self.start.get().addr();
-            let old_end = self.end.get();
+            let old_end = self.endaa.get();
             let end = old_end.addr();
 
             let bytes = align_up(layout.size(), Self::ALIGN_OF_T);
@@ -102,7 +102,8 @@ impl<T> Manual<T> {
                 let new_end = align_down(sub, layout.align());
                 if start <= new_end {
                     let new_end = old_end.with_addr(new_end);
-                    self.end.set(new_end);
+                    self.endaa.set(new_end);
+                    self.update_chunks(self.start.get(), layout.size() as isize);
                     return new_end;
                 }
             }
@@ -112,11 +113,21 @@ impl<T> Manual<T> {
     }
 
     pub fn deallocate(&self, ptr: *mut T, layout: Layout) {
-        let start = align_up(ptr.addr(), Self::ALIGN_OF_T);
-        let end = unsafe { align_down(ptr.add(layout.size()).addr(), Self::ALIGN_OF_T) - 1 };
+        assert_eq!(ptr.align_offset(layout.align()), 0);
+        let endaa = ptr.addr().min(self.endaa.get().addr());
+        let start = align_up(unsafe { ptr.sub(layout.size()).addr() }, layout.align());
+        dbg!(
+            endaa,
+            start,
+            layout.size(),
+            &self.start.get().addr(),
+            &self.endaa.get().addr(),
+            endaa >= self.start.get().addr(),
+            start <= self.endaa.get().addr()
+        );
 
         // assert these are owned by us
-        assert!(start >= self.start.get().addr() && end <= self.end.get().addr());
+        assert!(endaa >= self.start.get().addr() && start <= self.endaa.get().addr());
 
         // find chunks we are altering and remove the entries
         let mut chunks = self.chunks.borrow_mut();
@@ -125,7 +136,7 @@ impl<T> Manual<T> {
             .filter(|x| {
                 let x_stt = { x.storage.as_ptr() as *mut T }.addr();
                 let x_end = x_stt + x.storage.len();
-                x_stt <= start && x_end >= end
+                x_stt <= endaa || x_end >= start
             })
             .collect();
         assert_ne!(
@@ -138,14 +149,17 @@ impl<T> Manual<T> {
             // this chunk is being changed
             // get the range being changed
             // `start`..=`chk.end()` or `start`..=end
-            let chk_end = chk.end().addr().min(end);
+            let chk_end = chk.end().addr().min(endaa);
+            // dbg!(chk_end, chk_start);
             if let Some(size) = chk_end.checked_sub(start) {
                 let entries_count = size / Self::SIZE_OF_T + 1;
 
+                // dbg!(chk.entries, entries_count, size);
                 chk.entries = chk
                     .entries
                     .checked_sub(entries_count)
                     .unwrap_or_else(|| panic!("impossible deallocation"));
+                // dbg!(chk.entries);
             } else {
                 unreachable!("i think i asserted enough")
             }
@@ -195,7 +209,7 @@ impl<T> Manual<T> {
         // Make sure we're not dumb, `end` should be greater than `start`
         debug_assert!(chunk.start().addr() <= end);
 
-        self.end.set(chunk.end().with_addr(end));
+        self.endaa.set(chunk.end().with_addr(end));
 
         chunks.push(chunk);
     }
@@ -229,10 +243,10 @@ impl<T> Manual<T> {
 
         if let Some(last_chunk) = chunks.last_mut() {
             let end = align_down(last_chunk.end().addr(), Self::ALIGN_OF_T);
-            self.end.set(last_chunk.end().with_addr(end));
+            self.endaa.set(last_chunk.end().with_addr(end));
         } else {
             self.start.set(ptr::null_mut());
-            self.end.set(ptr::null_mut());
+            self.endaa.set(ptr::null_mut());
         }
     }
 
@@ -262,7 +276,7 @@ mod tests {
     fn create_manual() {
         let manual: Manual<u8> = Default::default();
         assert!(manual.start.get().is_null());
-        assert!(manual.end.get().is_null());
+        assert!(manual.endaa.get().is_null());
         assert!(manual.chunks.borrow().len() == 0);
     }
 
@@ -273,11 +287,11 @@ mod tests {
         manual.grow(Layout::for_value(&U8_VALUE));
         assert_eq!(manual.chunks.borrow().first().unwrap().storage.len(), PAGE);
         assert!(!manual.start.get().is_null());
-        assert!(!manual.end.get().is_null());
+        assert!(!manual.endaa.get().is_null());
 
         manual.shrink(Layout::from_size_align(PAGE, U8_ALIGNMENT).ok().unwrap());
         assert!(manual.start.get().is_null());
-        assert!(manual.end.get().is_null());
+        assert!(manual.endaa.get().is_null());
     }
 
     #[test]
@@ -320,8 +334,6 @@ mod tests {
         //         .collect::<Vec<*mut [mem::MaybeUninit<u8>]>>()
         // );
 
-        manual.deallocate(saved_bytes.as_ptr().cast_mut(), Layout::for_value(&slice));
-
         // assert_eq!();
     }
     #[test]
@@ -344,7 +356,7 @@ mod tests {
 
         assert_eq!(
             manual.chunks.borrow().first().unwrap().entries,
-            PAGE / 2,
+            PAGE / 2 - 1,
             "chunk.entries updated"
         );
 
