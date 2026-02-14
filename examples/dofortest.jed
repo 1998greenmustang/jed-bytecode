@@ -1,22 +1,15 @@
 func main 0
-	push_lit 10
 	push_lit 0
-	push_lit 5
-	push_lit 1
-	push_range
-	create_list 5
-	store_name num
-	store_temp
-	push_name num
-	push_temp
-	list_push
-	push_name num
-	push_lit 10
-	list_push
+	store_name i
 	
-	push_name num
-	get_iter
-	iterate
+	push_lit 10
+	do_for
+		push_name i
 		call_builtin println
+
+		push_name i
+		push_lit 1
+		bin_op +
+		store_name i
 	done
 exit

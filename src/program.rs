@@ -4,7 +4,10 @@ use std::{
     io::{self, BufReader, Read, Write},
 };
 
-use crate::{arena::Dropless, object::Object, operation::Operation, utils, MAGIC_NUMBER};
+use crate::{
+    arena::Dropless, error::ProgramErrorKind, object::Object, operation::Operation, utils,
+    MAGIC_NUMBER,
+};
 
 type Arity = usize;
 type Index = usize;
@@ -17,6 +20,7 @@ pub struct Program {
     pub saved_strings: BTreeMap<String, &'static [u8]>,
     pub instructions: Vec<Operation>,
     pub funcs: BTreeMap<&'static [u8], (Index, Arity)>,
+    pub block_returns: BTreeMap<Index, Index>,
     pub memos: MemoTable,
 }
 
@@ -28,6 +32,7 @@ impl Program {
             instructions: vec![],
             funcs: BTreeMap::new(),
             memos: HashMap::new(),
+            block_returns: BTreeMap::new(),
         };
         // register keywords/stuff that not be added later
         // probably should be a macro but (:
@@ -253,12 +258,59 @@ impl Program {
 
                 // push_temp, pop, store_temp, done, exit, do_for, list_push, push_range,
                 // get_ptr, read_ptr, set_ptr, get_iter, iter_next, iter_prev, iter_skip,
-                // iter_current
+                // iter_current, iterate, do_if, debug
                 6 | 7 | 11 | 13 | 14 | 15 | 18 | 21 | 23 | 24 | 25 | 26 | 27 | 28 | 29 | 30
-                | 31 | 32 => program.instructions.push(op_buffer[0].into()),
+                | 31 | 32 | 33 => program.instructions.push(op_buffer[0].into()),
                 _ => break,
             }
         }
+        // Get the Done address for each block
+        let blocks: Vec<(usize, &Operation)> = program
+            .instructions
+            .iter()
+            .enumerate()
+            .filter(|(_, o)| match o {
+                Operation::Done | Operation::Exit => return true,
+                Operation::Func(_, _)
+                | Operation::DoFor
+                | Operation::DoForIn(_)
+                | Operation::Iterate
+                | Operation::DoIf => return true,
+                _ => return false,
+            })
+            .collect();
+
+        assert_eq!(
+            blocks.len() % 2,
+            0,
+            "bro some block aint closed {:?}",
+            blocks
+        );
+        let mut claimed_dones: Vec<usize> = vec![];
+        for (block_pc, block_op) in blocks.iter() {
+            match block_op {
+                Operation::Func(_, _)
+                | Operation::DoFor
+                | Operation::DoForIn(_)
+                | Operation::Iterate
+                | Operation::DoIf => {
+                    for (done_pc, done_op) in blocks.iter().rev() {
+                        match done_op {
+                            Operation::Done | Operation::Exit => {
+                                if !claimed_dones.contains(done_pc) {
+                                    claimed_dones.push(*done_pc);
+                                    program.block_returns.insert(*block_pc, *done_pc);
+                                    break;
+                                }
+                            }
+                            _ => (),
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+
         return Ok(program);
     }
     pub fn from_string(text: String) -> Self {
@@ -269,6 +321,9 @@ impl Program {
             }
             let line_spl: Vec<&str> = line.split(' ').map(|x| x.trim()).collect();
             let op = line_spl[0];
+            if op.starts_with('#') {
+                continue;
+            }
             assert!(Operation::exists(op), "'{}' not a valid operation", op);
 
             let arg = line_spl[1..].join(" ");
@@ -324,12 +379,61 @@ impl Program {
                 30 => Operation::IterCurrent,
                 31 => Operation::Iterate,
                 32 => Operation::DoIf,
+                33 => Operation::Debug,
 
                 0 | _ => panic!("No such operation '{}'", op),
             };
             program.instructions.push(operation);
         }
+        // Get the Done address for each block
+        // Also I think this is dumb?
+        // But, hey it works.
+        let blocks: Vec<(usize, &Operation)> = program
+            .instructions
+            .iter()
+            .enumerate()
+            .filter(|(_, o)| match o {
+                Operation::Done | Operation::Exit => return true,
+                Operation::Func(_, _)
+                | Operation::DoFor
+                | Operation::DoForIn(_)
+                | Operation::Iterate
+                | Operation::DoIf => return true,
+                _ => return false,
+            })
+            .collect();
+
+        assert_eq!(
+            blocks.len() % 2,
+            0,
+            "bro some block aint closed {:?}",
+            blocks
+        );
+        let mut block_queue: Vec<usize> = vec![];
+        for (pc, op) in blocks.iter() {
+            match op {
+                Operation::Func(_, _)
+                | Operation::DoFor
+                | Operation::DoForIn(_)
+                | Operation::Iterate
+                | Operation::DoIf => {
+                    block_queue.push(*pc);
+                }
+                Operation::Done | Operation::Exit => {
+                    let block_pc = block_queue.pop().unwrap();
+                    program.block_returns.insert(block_pc, *pc);
+                }
+                _ => {}
+            }
+        }
         return program;
+    }
+
+    pub fn get_done(&self, pc: &usize) -> Result<&usize, ProgramErrorKind> {
+        match self.block_returns.get(pc) {
+            Some(address) => Ok(address),
+            None => Err(ProgramErrorKind::DoneAddress),
+        }
     }
 
     // pub fn import_module(&mut self, other: &mut Program) {

@@ -23,12 +23,17 @@ pub enum ProgramErrorKind {
     IterNext(usize), // index, length
     IterPrevious,    // index, length
     TodoError,
+    DoneAddress,
 }
 
 impl Display for ProgramErrorKind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            ProgramErrorKind::StackError(n) => write!(f, "expected {n} objects on the stack"),
+            ProgramErrorKind::StackError(n) => write!(
+                f,
+                "expected {n} object{} on the stack",
+                if n > &1 { "s" } else { "" }
+            ),
             ProgramErrorKind::BinopError(kind, left, right) => write!(
                 f,
                 "{kind} not implemented for \n   left: {left:?}\n   right: {right:?}"
@@ -70,6 +75,7 @@ impl Display for ProgramErrorKind {
             ProgramErrorKind::TodoError => {
                 write!(f, "there is an error here, but im not sure what it is")
             }
+            ProgramErrorKind::DoneAddress => write!(f, "somehow there's no done address to go to"),
         }
     }
 }

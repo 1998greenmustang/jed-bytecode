@@ -1,5 +1,5 @@
 func main 0
-	push_lit 31
+	push_lit 10001
 	store_name n
 
 	push_lit 1
@@ -9,6 +9,7 @@ func main 0
 	create_list
 	store_name prime
 
+# create list of trues
 	push_name prime
 	get_iter
 	store_name prime_iter
@@ -22,8 +23,6 @@ func main 0
 		list_set
 	done
 
-
-	push_lit 2
 	push_lit 2
 	store_name i
 	
@@ -31,40 +30,49 @@ func main 0
 	call_builtin sqrt
 	push_lit 1
 	bin_op +
-	
+# loop for sqrt(n) + 1
+# 6 in the case of n = 30
 	do_for
+		
 		push_name prime
 		push_name i
 		list_get
 		do_if
+
+		# start = i^2
 			push_name i
 			push_name i
 			bin_op *
+		# end = n - 1	
 			push_name n
 			push_lit 1
 			bin_op -
+		# steps = i
 			push_name i
-			push_range
+				push_range
 			create_list
+			
 			get_iter
 			iterate
+			# temp = y (from the iteration)
 				store_temp
 				push_lit false
 				push_name prime
 				push_temp
+			# set prime[y] = false
 				list_set
 			done
 		done
 
-		push_name prime
-		call_builtin println
-
+	# i += 1
 		push_name i
 		push_lit 1
 		bin_op +
 		store_name i
+
 	done
 
+	# print the index IF its true (meaning prime)
 	push_name prime
 	get_iter
 	store_temp 

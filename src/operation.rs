@@ -47,6 +47,7 @@ pub enum Operation {
     IterCurrent,
     Iterate,
     DoIf,
+    Debug,
     Import(&'static [u8]),
     Empty,
 }
@@ -98,6 +99,7 @@ impl From<u8> for Operation {
             28 => Operation::IterPrev,
             29 => Operation::IterSkip,
             30 => Operation::IterCurrent,
+            33 => Operation::Debug,
             _ => panic!(),
         }
     }
@@ -138,7 +140,8 @@ impl From<Operation> for u8 {
             Operation::IterCurrent => 30,
             Operation::Iterate => 31,
             Operation::DoIf => 32,
-            Operation::Import(_) => 33,
+            Operation::Debug => 33,
+            Operation::Import(_) => 34,
             Operation::Empty => todo!(),
         }
     }
@@ -187,6 +190,7 @@ impl Display for Operation {
             Operation::IterCurrent => write!(f, "iter_current"),
             Operation::Iterate => write!(f, "iterate"),
             Operation::DoIf => write!(f, "do_if"),
+            Operation::Debug => write!(f, "debug"),
             Operation::Import(bytes) => write!(f, "import {}", bytes_to_string(bytes)),
             Operation::Empty => write!(f, ""),
         }
@@ -228,6 +232,7 @@ impl Operation {
             "iter_current" => true,
             "iterate" => true,
             "do_if" => true,
+            "debug" => true,
             "import" => true,
             _ => false,
         }
@@ -267,7 +272,8 @@ impl Operation {
             "iter_current" => 30,
             "iterate" => 31,
             "do_if" => 32,
-            "import" => 33,
+            "debug" => 33,
+            "import" => 34,
             _ => 0,
         }
     }
@@ -498,17 +504,11 @@ impl Operation {
                         vm.program.set_memo(frame.memo_key, *return_value);
                         vm.counter = frame.return_address;
                     }
-                    FrameKind::Loop => {
-                        let next_frame = vm.call_stack.last_mut_option();
-                        if let Some(nxt) = next_frame {
-                            if nxt.return_address == frame.return_address {
-                                nxt.copy_locals(&frame);
-                                vm.counter = frame.return_address;
-                            } else {
-                                // vm.counter = vm.counter + 1;
-                                return Ok(());
-                            }
-                        }
+                    FrameKind::IterateLoop | FrameKind::DoForLoop | FrameKind::DoForInLoop => {
+                        vm.call_stack.push(frame);
+                    }
+                    FrameKind::DoIfBlock => {
+                        return Ok(());
                     }
                     FrameKind::Main => vm.exit(Some(0)),
                 }
@@ -541,12 +541,18 @@ impl Operation {
                         Ok(it) => it,
                         Err(err) => vm.error(err)?,
                     };
-                    let mut new_frame = Frame::new(pc, FrameKind::Loop);
+                    let mut new_frame = Frame::new(pc, FrameKind::DoForLoop);
                     new_frame.copy_locals(last_frame);
-                    vm.call_stack.push(new_frame);
+                    vm.call_stack.push(new_frame.clone());
                     for _ in 0..times {
                         vm.counter = pc;
-                        vm.run_block();
+                        vm.run_block(FrameKind::DoForLoop);
+                    }
+                    let _ = vm.call_stack.pop();
+                    let done_address = vm.program.get_done(&(pc - 1));
+                    match done_address {
+                        Ok(addy) => vm.goto(*addy + 1),
+                        Err(e) => vm.error(e)?,
                     }
                 }
                 Ok(())
@@ -563,14 +569,14 @@ impl Operation {
                     panic!("No such name '{}'", utils::bytes_to_string(obj_name))
                 });
                 let pc = vm.counter.clone();
-                let mut new_frame = Frame::new(pc, FrameKind::Loop);
+                let mut new_frame = Frame::new(pc, FrameKind::DoForInLoop);
                 new_frame.copy_locals(current_frame);
                 vm.call_stack.push(new_frame);
                 match obj_ptr.as_tuple() {
                     (ObjectKind::List, ObjectData::List(_start, len)) => unsafe {
                         for _ in 0..*len {
                             vm.counter = pc;
-                            vm.run_block();
+                            vm.run_block(FrameKind::DoForInLoop);
                         }
                     },
                     (ObjectKind::Iterator, ObjectData::Iterator(list_ptr, _next)) => unsafe {
@@ -578,7 +584,7 @@ impl Operation {
                         if let ObjectData::List(_start, len) = list {
                             for _ in 0..*len {
                                 vm.counter = pc;
-                                vm.run_block();
+                                vm.run_block(FrameKind::DoForInLoop);
                             }
                         }
                     },
@@ -586,6 +592,12 @@ impl Operation {
                     (kind, _data) => {
                         return vm.error(ProgramErrorKind::TypeError(ObjectKind::List, kind))
                     }
+                }
+                let _ = vm.call_stack.pop();
+                let done_address = vm.program.get_done(&(pc - 1));
+                match done_address {
+                    Ok(addy) => vm.goto(*addy + 1),
+                    Err(e) => vm.error(e)?,
                 }
                 Ok(())
             }
@@ -599,19 +611,28 @@ impl Operation {
                     Ok(objs) => objs.iter().map(|o| **o).collect(),
                     Err(e) => return vm.error(e),
                 };
-                let objects: &'static [Object] = vm.register_many(objects.as_slice());
+                if objects.len() > 0 {
+                    let objects: &'static [Object] = vm.register_many(objects.as_slice());
+                    let len = Box::new(objects.len());
+                    let obj_ptr = objects.as_ptr();
+                    let obj_ptr: Box<usize> = Box::new(obj_ptr.addr());
+                    let obj = Object {
+                        kind: ObjectKind::List,
+                        data: ObjectData::List(Box::into_raw(obj_ptr), Box::into_raw(len)),
+                    };
+                    let obj: &'static Object = vm.register_single(obj);
 
-                let len = Box::new(objects.len());
-                let obj_ptr = objects.as_ptr();
-                let obj_ptr: Box<usize> = Box::new(obj_ptr.addr());
-                dbg!(*obj_ptr);
-                let obj = Object {
-                    kind: ObjectKind::List,
-                    data: ObjectData::List(Box::into_raw(obj_ptr), Box::into_raw(len)),
-                };
-                let obj: &'static Object = vm.register_single(obj);
-
-                vm.obj_stack.push(obj);
+                    vm.obj_stack.push(obj);
+                } else {
+                    let len = Box::new(0);
+                    let random_addr = Box::new(vm.memory.start().addr());
+                    let obj = Object {
+                        kind: ObjectKind::List,
+                        data: ObjectData::List(Box::into_raw(random_addr), Box::into_raw(len)),
+                    };
+                    let obj: &'static Object = vm.register_single(obj);
+                    vm.obj_stack.push(obj);
+                }
 
                 Ok(())
             }
@@ -623,7 +644,6 @@ impl Operation {
                 match { vm.obj_stack.pop_mut() } {
                     Ok(mut t) => {
                         let Object { kind, mut data } = &mut t;
-                        dbg!(t.as_ptr());
                         if let ObjectData::List(ref mut start, ref mut len) = data {
                             let starting_obj = **start as *const Object;
 
@@ -632,7 +652,6 @@ impl Operation {
                                 **len += 1;
                             } else {
                                 vm.drop(obj);
-                                let cloned_list = vm.drop_list(starting_obj, **len);
                                 let mut objects: Vec<Object> = vec![];
                                 for i in 0..**len {
                                     let obj = starting_obj.add(i);
@@ -644,8 +663,6 @@ impl Operation {
                                 let new_start = start.with_addr(objects.as_ptr().addr());
                                 **start = new_start as usize;
                                 **len += 1;
-                                dbg!("listpush", *(**start as *mut Object), **len);
-                                println!("i had to make a new list");
                             }
                         } else {
                             return Err(ProgramError(
@@ -761,17 +778,17 @@ impl Operation {
                                 Ok(v) => v,
                                 Err(_) => return vm.error(ProgramErrorKind::IntegerToUnsigned),
                             };
-                            let values: &'static [Object] = vm.register_many(
-                                (s..n)
-                                    .step_by(p)
-                                    .map(|v| Object {
-                                        kind: ObjectKind::Integer,
-                                        data: ObjectData::Integer(v),
-                                    })
-                                    .collect::<Vec<Object>>()
-                                    .as_slice(),
-                            );
-                            values.iter().for_each(|v| vm.obj_stack.push(v));
+                            let values = (s..n)
+                                .step_by(p)
+                                .map(|v| Object {
+                                    kind: ObjectKind::Integer,
+                                    data: ObjectData::Integer(v),
+                                })
+                                .collect::<Vec<Object>>();
+                            if values.len() > 0 {
+                                let values: &'static [Object] = vm.register_many(&values);
+                                values.iter().for_each(|v| vm.obj_stack.push(v));
+                            }
                             Ok(())
                         }
                         _ => todo!(),
@@ -902,12 +919,11 @@ impl Operation {
                 }?;
 
                 if let ObjectData::Iterator(list_ptr, ref mut next) = data {
-                    dbg!(list_ptr);
                     let list = *list_ptr;
                     if let ObjectData::List(start, len) = list {
                         let start = *start as *const Object;
                         vm.obj_stack.push(&*start.add(**next));
-                        if **next <= *len {
+                        if **next < *len {
                             **next += 1;
                         } else {
                             return vm.error(ProgramErrorKind::IterNext(*len));
@@ -927,22 +943,22 @@ impl Operation {
                     }
                 }?;
 
-                if let ObjectData::Iterator(list_ptr, ref mut current) = data {
+                if let ObjectData::Iterator(list_ptr, ref mut next) = data {
                     let list = *list_ptr;
                     if let ObjectData::List(start, len) = list {
                         let start = *start as *const Object;
-                        let cur_val = **current;
+                        let cur_val = **next;
                         if cur_val == *len {
-                            **current -= 1;
-                            vm.obj_stack.push(&*start.add(**current));
+                            **next -= 1;
+                            vm.obj_stack.push(&*start.add(**next));
                         } else if cur_val == 0 {
                             return vm.error(ProgramErrorKind::IterPrevious);
                         } else {
-                            vm.obj_stack.push(&*start.add(**current));
-                            **current -= 1;
+                            **next -= 1;
+                            vm.obj_stack.push(&*start.add(**next));
                         }
                     }
-                    // } else {
+                } else {
                     return vm.error(ProgramErrorKind::TypeError(ObjectKind::Iterator, *kind));
                 }
                 Ok(())
@@ -982,23 +998,37 @@ impl Operation {
                 if let ObjectData::Iterator(list_ptr, next) = data {
                     let list = **list_ptr;
                     if let ObjectData::List(start, len) = list {
-                        let start = *start as *const Object;
-                        dbg!("listpush", *(start), *len);
-                        let pc = vm.counter.clone();
-                        let last_frame = match vm.call_stack.last() {
-                            Ok(it) => it,
-                            Err(err) => vm.error(err)?,
-                        };
-                        let mut new_frame = Frame::new(pc, FrameKind::Loop);
-                        new_frame.copy_locals(last_frame);
-                        vm.call_stack.push(new_frame);
+                        if *len != 0 && **next < *len {
+                            let start = *start as *const Object;
+                            let pc = vm.counter.clone();
+                            let last_frame = match vm.call_stack.last() {
+                                Ok(it) => it,
+                                Err(err) => vm.error(err)?,
+                            };
+                            let mut new_frame = Frame::new(pc, FrameKind::IterateLoop);
+                            new_frame.copy_locals(last_frame);
+                            vm.call_stack.push(new_frame);
 
-                        for n in (**next)..*len {
-                            **next = n + 1;
-                            vm.counter = pc;
-                            // println!("{}", &*start.add(n));
-                            vm.obj_stack.push(&*start.add(n));
-                            vm.run_block();
+                            for n in (**next)..*len {
+                                **next = n + 1;
+                                vm.counter = pc;
+                                // println!("iterate: {}, pc: {pc}", &*start.add(n));
+                                vm.obj_stack.push(&*start.add(n));
+
+                                vm.run_block(FrameKind::IterateLoop);
+                            }
+                            let _ = vm.call_stack.pop();
+                            let done_address = vm.program.get_done(&(pc - 1));
+                            match done_address {
+                                Ok(addy) => vm.goto(*addy + 1),
+                                Err(e) => vm.error(e)?,
+                            }
+                        } else {
+                            let done_address = vm.program.get_done(&(vm.counter - 1));
+                            match done_address {
+                                Ok(addy) => vm.goto(*addy),
+                                Err(e) => vm.error(e)?,
+                            }
                         }
                     }
                 } else {
@@ -1022,12 +1052,31 @@ impl Operation {
                                 Err(_) => vm.error(ProgramErrorKind::StackError(1)),
                             }
                         }?;
-                        let mut new_frame = Frame::new(vm.counter, FrameKind::Loop);
+                        let mut new_frame = Frame::new(vm.counter, FrameKind::DoIfBlock);
                         new_frame.copy_locals(frame);
                         vm.call_stack.push(new_frame);
-                        vm.run_block();
+                        vm.run_block(FrameKind::DoIfBlock);
+                    } else {
+                        let done_address = vm.program.get_done(&(vm.counter - 1));
+                        match done_address {
+                            Ok(addy) => vm.goto(*addy),
+                            Err(e) => vm.error(e)?,
+                        }
                     }
                 }
+                Ok(())
+            }
+            Operation::Debug => {
+                let objs = match unsafe { vm.obj_stack.at_most_n(10) } {
+                    Ok(os) => Ok(os),
+                    Err(e) => vm.error(e),
+                }?;
+                let frames = match unsafe { vm.call_stack.at_most_n(10) } {
+                    Ok(fs) => Ok(fs),
+                    Err(e) => vm.error(e),
+                }?;
+                println!("object stack: {:?}", objs);
+                // println!("call stack: {:?}", frames);
                 Ok(())
             }
             Operation::Import(bytes) => {

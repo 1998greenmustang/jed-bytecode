@@ -92,20 +92,25 @@ impl<T> Manual<T> {
             return start;
         }
 
+        // allocate from `self.start` to `self.start + layout.size()`
+        // return self.start; change self.start to `self.start + layout.size()`
         loop {
-            let start = self.start.get().addr();
-            let old_end = self.endaa.get();
-            let end = old_end.addr();
+            let old_start = self.start.get();
+            let start = old_start.addr();
+            let end = self.endaa.get().addr();
 
             let bytes = align_up(layout.size(), Self::ALIGN_OF_T);
-            if let Some(sub) = end.checked_sub(bytes) {
-                let new_end = align_down(sub, layout.align());
-                if start <= new_end {
-                    let new_end = old_end.with_addr(new_end);
-                    self.endaa.set(new_end);
-                    self.update_chunks(self.start.get(), layout.size() as isize);
-                    return new_end;
+            match start.checked_add(bytes) {
+                Some(add) => {
+                    let new_start = align_up(add, layout.align());
+                    if new_start <= end {
+                        let new_start = old_start.with_addr(new_start);
+                        self.start.set(new_start);
+                        self.update_chunks(old_start, layout.size() as isize);
+                        return old_start;
+                    }
                 }
+                _ => (),
             }
 
             self.grow(layout);
@@ -114,58 +119,57 @@ impl<T> Manual<T> {
 
     pub fn deallocate(&self, ptr: *mut T, layout: Layout) {
         assert_eq!(ptr.align_offset(layout.align()), 0);
-        let endaa = ptr.addr().min(self.endaa.get().addr());
-        let start = align_up(unsafe { ptr.sub(layout.size()).addr() }, layout.align());
-        dbg!(
-            endaa,
-            start,
-            layout.size(),
-            &self.start.get().addr(),
-            &self.endaa.get().addr(),
-            endaa >= self.start.get().addr(),
-            start <= self.endaa.get().addr()
-        );
+        let start = ptr.addr();
+        let end = ptr.addr() + layout.size();
+        // dbg!(
+        //     endaa,
+        //     start,
+        //     layout.size(),
+        //     &self.start.get().addr(),
+        //     &self.endaa.get().addr(),
+        //     endaa >= self.start.get().addr(),
+        //     start <= self.endaa.get().addr()
+        // );
 
-        // assert these are owned by us
-        assert!(endaa >= self.start.get().addr() && start <= self.endaa.get().addr());
+        if start < self.start.get().addr() {
+            // find chunks we are altering and remove the entries
+            let mut chunks = self.chunks.borrow_mut();
+            let altered_chunks: Vec<&mut Chunk<T>> = chunks
+                .iter_mut()
+                .filter(|x| {
+                    let x_stt = { x.storage.as_ptr() as *mut T }.addr();
+                    let x_end = x_stt + x.storage.len();
+                    x_stt <= end || x_end >= start
+                })
+                .collect();
+            assert_ne!(
+                altered_chunks.len(),
+                0,
+                "Cannot find the chunk being altered"
+            );
+            for chk in altered_chunks {
+                let chk_start = chk.start().addr();
+                // this chunk is being changed
+                // get the range being changed
+                // `start`..=`chk.end()` or `start`..=end
+                let chk_end = chk.end().addr().min(end);
+                // dbg!(chk_end, chk_start);
+                if let Some(size) = chk_end.checked_sub(start) {
+                    let entries_count = size / Self::SIZE_OF_T + 1;
 
-        // find chunks we are altering and remove the entries
-        let mut chunks = self.chunks.borrow_mut();
-        let altered_chunks: Vec<&mut Chunk<T>> = chunks
-            .iter_mut()
-            .filter(|x| {
-                let x_stt = { x.storage.as_ptr() as *mut T }.addr();
-                let x_end = x_stt + x.storage.len();
-                x_stt <= endaa || x_end >= start
-            })
-            .collect();
-        assert_ne!(
-            altered_chunks.len(),
-            0,
-            "Cannot find the chunk being altered"
-        );
-        for chk in altered_chunks {
-            let chk_start = chk.start().addr();
-            // this chunk is being changed
-            // get the range being changed
-            // `start`..=`chk.end()` or `start`..=end
-            let chk_end = chk.end().addr().min(endaa);
-            // dbg!(chk_end, chk_start);
-            if let Some(size) = chk_end.checked_sub(start) {
-                let entries_count = size / Self::SIZE_OF_T + 1;
-
-                // dbg!(chk.entries, entries_count, size);
-                chk.entries = chk
-                    .entries
-                    .checked_sub(entries_count)
-                    .unwrap_or_else(|| panic!("impossible deallocation"));
-                // dbg!(chk.entries);
-            } else {
-                unreachable!("i think i asserted enough")
+                    // dbg!(chk.entries, entries_count, size);
+                    chk.entries = chk
+                        .entries
+                        .checked_sub(entries_count)
+                        .unwrap_or_else(|| panic!("impossible deallocation"));
+                    // dbg!(chk.entries);
+                } else {
+                    unreachable!("i think i asserted enough")
+                }
             }
-        }
 
-        self.add_free(ptr.into(), layout.size());
+            self.add_free(ptr.into(), layout.size());
+        }
 
         // i want to shrink here but im not sure how
         // if self.end.get().addr() == end {
@@ -180,6 +184,10 @@ impl<T> Manual<T> {
         } else {
             free.push(Free { start, size })
         }
+    }
+
+    pub fn start(&self) -> *mut T {
+        self.start.get()
     }
 
     pub fn grow(&self, layout: Layout) {

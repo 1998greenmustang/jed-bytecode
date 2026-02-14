@@ -4,7 +4,10 @@ use crate::{object::Object, program::MemoKey};
 
 #[derive(PartialEq, Eq, Debug, Clone)]
 pub enum FrameKind {
-    Loop,
+    DoForLoop,
+    IterateLoop,
+    DoForInLoop,
+    DoIfBlock,
     Call,
     Main,
 }

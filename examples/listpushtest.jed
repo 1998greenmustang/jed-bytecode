@@ -1,0 +1,24 @@
+func main 0
+	push_lit 10
+	push_lit 0
+	push_lit 5
+	push_lit 1
+	push_range
+	create_list 5
+	store_name num
+	
+	store_temp
+	push_name num
+	push_temp
+	list_push
+	
+	push_name num
+	push_lit "hello world"
+	list_push
+	
+	push_name num
+	get_iter
+	iterate
+		call_builtin println
+	done
+exit

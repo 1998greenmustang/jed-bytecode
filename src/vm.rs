@@ -125,7 +125,7 @@ impl VM {
         }
     }
 
-    pub fn run_block(&mut self) {
+    pub fn run_block(&mut self, frame_type: FrameKind) {
         loop {
             self.update_span();
             if self.counter == self.program.instructions.len() - 1 {
@@ -159,10 +159,11 @@ impl VM {
 
             if let Ok(frame) = self.call_stack.last() {
                 let op = self.program.get_op(self.counter);
-                match (frame.kind.clone(), op) {
-                    (FrameKind::Loop, Operation::Done) => return,
-                    (FrameKind::Loop, Operation::Exit) => return,
-                    _ => (),
+                if frame.kind == frame_type {
+                    match op {
+                        Operation::Done | Operation::Exit => return,
+                        _ => (),
+                    }
                 }
             }
         }

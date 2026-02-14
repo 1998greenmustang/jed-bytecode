@@ -13,9 +13,12 @@ func main 0
 	push_name iterable
 	iter_next
 	call_builtin println
-	push_name iterable
-	iter_next
-	call_builtin println
+
+	##should fail on this one
+	##that is why its commented
+	# push_name iterable
+	# iter_next
+	# call_builtin println
 	
 	push_name iterable
 	iter_prev
