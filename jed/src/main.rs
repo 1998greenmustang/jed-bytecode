@@ -1,3 +1,4 @@
+extern crate jed_macros;
 extern crate lexopt;
 mod arena;
 mod binops;
