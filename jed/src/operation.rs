@@ -1,6 +1,8 @@
 use std::{convert::TryInto, fmt::Display};
 
-use jed_macros::create_operations;
+use jed_macros::{
+    IndexFroms, IndexToSnakeCase, SnakeCaseDisplay, SnakeCaseExists, SnakeCaseToIndex,
+};
 
 use crate::{
     binops::BinOpKind,
@@ -8,20 +10,47 @@ use crate::{
     error::{ProgramError, ProgramErrorKind},
     frame::{Frame, FrameKind},
     object::{Object, ObjectData, ObjectKind},
-    utils::{self, bytes_to_string, display_func, display_option_usize},
+    utils::{self, bytes_to_string, display_option_usize},
     vm::VM,
 };
 
-create_operations!(
-(): Empty,
+#[repr(u8)]
+#[derive(
+    Copy,
+    Clone,
+    Debug,
+    SnakeCaseDisplay,
+    SnakeCaseToIndex,
+    IndexToSnakeCase,
+    SnakeCaseExists,
+    IndexFroms,
+)]
+pub enum Operation {
+    #[jed(type: Option<usize>, func: display_option_usize)]
+    #[jed(type: &'static [u8], func: bytes_to_string)]
+    BinOp(BinOpKind),
+    Call(&'static [u8]),
+    CallBuiltIn(BuiltIn),
+    PushLit(&'static [u8]),
+    PushName(&'static [u8]),
+    PushTemp,
     Pop,
+    ReturnIf(&'static [u8]),
+    StoreConst(&'static [u8]),
+    StoreName(&'static [u8]),
+    StoreTemp,
+    Func(&'static [u8], usize),
     Done,
     Exit,
     DoFor,
-    PushTemp,
-    StoreTemp,
+    DoForIn(&'static [u8]),
+    CreateList(Option<usize>),
     ListPush,
+    ListGet(Option<usize>),
+    ListSet(Option<usize>),
+    ListAlloc(Option<usize>),
     PushRange,
+    ReturnIfConst(&'static [u8]),
     GetPtr,
     ReadPtr,
     SetPtr,
@@ -32,24 +61,10 @@ create_operations!(
     IterCurrent,
     Iterate,
     DoIf,
-    Debug;
-(BinOpKind): BinOp;
-(BuiltIn): CallBuiltIn;
-(&'static [u8], usize) display_func: Func;
-(&'static [u8]) bytes_to_string: Call,
-               PushLit,
-               PushName,
-               ReturnIf,
-               StoreConst,
-               StoreName,
-               DoForIn,
-               ReturnIfConst,
-               Import;
-(Option<usize>) display_option_usize: CreateList,
-               ListGet,
-               ListSet,
-               ListAlloc;
-           );
+    Debug,
+    Import(&'static [u8]),
+    Empty,
+}
 
 impl Operation {
     pub fn call(&self, vm: &mut VM) -> Result<(), ProgramError> {

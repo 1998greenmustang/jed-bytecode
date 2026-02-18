@@ -173,6 +173,7 @@ impl Program {
             if n != 1 {
                 break;
             }
+            let op = Operation::from_index(&op_buffer[0]);
             match op_buffer[0] {
                 // "bin_op"
                 // BinOpKind
@@ -389,9 +390,7 @@ impl Program {
 
             program.instructions.push(operation);
         }
-        // Get the Done address for each block
-        // Also I think this is dumb?
-        // But, hey it works.
+        
         let blocks: Vec<(usize, &Operation)> = program
             .instructions
             .iter()

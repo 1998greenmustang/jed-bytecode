@@ -1,6 +1,6 @@
 use std::iter::Peekable;
 
-use proc_macro::{Delimiter, Ident, TokenTree, token_stream::IntoIter};
+use proc_macro::{Delimiter, Ident, TokenStream, TokenTree, token_stream::IntoIter};
 
 // i want to test if its actually a 'kind'able identifier
 // but, that can be pretty complex i dont really want to deal with
@@ -16,16 +16,30 @@ pub fn tuple_count(kind: &String) -> usize {
     kind.chars().filter(|&c| c == ',').count() + 1
 }
 
-pub fn snake_case(s: &String) -> String {
-    let mut snake_case = String::new();
-    for (i, c) in s.char_indices() {
-        if c.is_ascii_uppercase() && i != 0 {
-            snake_case.push('_');
+pub trait SnakeCase<T: ToString = Self>: ToString {
+    fn to_snake_case(&self) -> String {
+        let mut snake_case = String::new();
+        let txt = self.to_string();
+        let iter = txt.char_indices().into_iter();
+        let iter1 = txt.char_indices().into_iter();
+
+        for ((i, c), (i1, c1)) in iter.zip(iter1.skip(1)) {
+            if c.is_ascii_uppercase() && i != 0 && (c1.is_ascii_lowercase() || c1.is_ascii_digit())
+            {
+                snake_case.push('_');
+            }
+            snake_case.push(c.to_ascii_lowercase());
+            if i1 == txt.len() - 1 {
+                snake_case.push(c1.to_ascii_lowercase());
+            }
         }
-        snake_case.push(c.to_ascii_lowercase());
+        return snake_case;
     }
-    return snake_case;
 }
+
+impl SnakeCase<&String> for &String {}
+
+impl SnakeCase<Ident> for Ident {}
 
 pub fn empty_tuple(kind: &String) -> String {
     if kind == "()" {

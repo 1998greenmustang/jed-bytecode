@@ -1,12 +1,17 @@
 extern crate proc_macro;
+mod ast;
 mod generators;
+mod macros;
 mod utils;
 use std::{collections::HashMap, str::FromStr};
+use utils::SnakeCase;
 
 use proc_macro::*;
 
 use generators::*;
 use utils::*;
+
+use crate::macros::{enum_display::*, enum_exists::*, index};
 
 type OperationEntry = (usize, OperationDefinition);
 
@@ -29,49 +34,55 @@ impl OperationDefinition {
         Self {
             iden: iden.clone(),
             kind,
-            snake_case: snake_case(&iden.to_string()),
+            snake_case: iden.to_snake_case(),
         }
     }
 }
 
-#[proc_macro]
-pub fn create_operations(stream: TokenStream) -> TokenStream {
-    let mut ops: Vec<OperationDefinition> = vec![];
-    let mut kinds: HashMap<String, KindStuff> = HashMap::new();
-    let mut iter = stream.into_iter().peekable();
-    loop {
-        // (type) opt_display_function: EnumMember, ...;
-        if let Some(kind) = iter.next_if(|x| is_kind(x)) {
-            let mut kstuff = KindStuff {
-                kind: kind.clone(),
-                display_func: iter.next_if(|x| is_ident(x)),
-                operations: vec![],
-            };
-
-            if let Some(_colon) = iter.next_if(|x| is_punct(x, ':')) {
-                let idens: &[Ident] = &collect_idents(&mut iter);
-                if let Some(_semi) = iter.next_if(|x| is_punct(x, ';')) {
-                    for id in idens {
-                        let def = OperationDefinition::new(id.clone(), kind.clone());
-                        kstuff.operations.push((ops.len(), def.clone()));
-                        ops.push(def)
-                    }
-                } else {
-                    break;
-                }
-            }
-            kinds.insert(kind.to_string(), kstuff);
-        } else {
-            break;
-        }
+// #[derive(SnakeCaseDisplay)]
+// enum Test {
+//     #[jed(type: Option<usize>, func: option_display )]
+//     TestEntry,
+// }
+#[proc_macro_derive(SnakeCaseDisplay, attributes(jed))]
+pub fn snake_case_enum_display(stream: TokenStream) -> TokenStream {
+    match ast::parse(stream) {
+        Ok(ast) => enum_display(ast, |x: &String| x.to_snake_case()),
+        Err(e) => panic!("{e:?}"),
     }
+}
 
-    let mut enum_def = generate_enum(&ops);
-    let from_def = generate_kind_things(kinds);
-    let name_def = generate_name_things(&ops);
-    enum_def.extend(from_def);
-    enum_def.extend(name_def);
-    return enum_def;
+#[proc_macro_derive(IndexToSnakeCase, attributes(jed))]
+pub fn index_to_snake_case(stream: TokenStream) -> TokenStream {
+    match ast::parse(stream) {
+        Ok(ast) => index::index_to_name(ast, |x: &String| x.to_snake_case()),
+        Err(e) => panic!("{e:?}"),
+    }
+}
+
+#[proc_macro_derive(SnakeCaseToIndex, attributes(jed))]
+pub fn snake_case_to_index(stream: TokenStream) -> TokenStream {
+    match ast::parse(stream) {
+        Ok(ast) => index::name_to_index(ast, |x: &String| x.to_snake_case()),
+        Err(e) => panic!("{e:?}"),
+    }
+}
+
+//
+#[proc_macro_derive(IndexFroms, attributes(jed))]
+pub fn index_froms(stream: TokenStream) -> TokenStream {
+    match ast::parse(stream) {
+        Ok(ast) => index::index_froms(ast),
+        Err(e) => panic!("{e:?}"),
+    }
+}
+
+#[proc_macro_derive(SnakeCaseExists, attributes(jed))]
+pub fn snake_case_enum_exists(stream: TokenStream) -> TokenStream {
+    match ast::parse(stream) {
+        Ok(ast) => enum_exists(ast, |x: &String| x.to_snake_case()),
+        Err(e) => panic!("{e:?}"),
+    }
 }
 
 #[proc_macro]
@@ -83,13 +94,7 @@ pub fn match_ops(stream: TokenStream) -> TokenStream {
         let mut g_iter = grp.stream().into_iter().peekable();
         let first = g_iter.next();
         let _ = g_iter.next_if(|x| is_punct(x, ','));
-        let second: Vec<TokenTree> = {
-            let mut v = Vec::new();
-            while let Some(tt) = g_iter.next() {
-                v.push(tt);
-            }
-            v
-        };
+        let second = g_iter.collect::<Vec<TokenTree>>();
 
         outputs.push(match first {
             Some(TokenTree::Group(g)) => {
