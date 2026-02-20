@@ -158,10 +158,7 @@ impl<T> Manual<T> {
                     let entries_count = size / Self::SIZE_OF_T + 1;
 
                     // dbg!(chk.entries, entries_count, size);
-                    chk.entries = chk
-                        .entries
-                        .checked_sub(entries_count)
-                        .unwrap_or_else(|| panic!("impossible deallocation"));
+                    chk.entries = chk.entries.checked_sub(entries_count).unwrap_or(0);
                     // dbg!(chk.entries);
                 } else {
                     unreachable!("i think i asserted enough")
@@ -188,6 +185,10 @@ impl<T> Manual<T> {
 
     pub fn start(&self) -> *mut T {
         self.start.get()
+    }
+
+    pub fn set_start(&mut self, val: *mut T) {
+        self.start.set(val)
     }
 
     pub fn grow(&self, layout: Layout) {
@@ -270,6 +271,12 @@ impl<T> Manual<T> {
             mem.copy_from(slice.as_ptr(), slice.len());
             return slice::from_raw_parts_mut(mem, slice.len());
         }
+    }
+
+    pub fn extend_from(&self, item: *mut T, n: usize) {
+        assert_eq!(item.addr(), self.start.get().addr());
+        self.start.set(unsafe { item.add(n) });
+        self.update_chunks(item, usize::cast_signed(n));
     }
 }
 

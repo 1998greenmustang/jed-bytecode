@@ -9,7 +9,7 @@ use crate::{
     builtin::BuiltIn,
     error::{ProgramError, ProgramErrorKind},
     frame::{Frame, FrameKind},
-    object::{Object, ObjectData, ObjectKind},
+    object::{MutableObject, Object, ObjectData, ObjectKind, RegObject},
     utils::{self, bytes_to_string, display_option_usize},
     vm::VM,
 };
@@ -362,7 +362,7 @@ impl Operation {
                 new_frame.copy_locals(current_frame);
                 vm.call_stack.push(new_frame);
                 match obj_ptr.as_tuple() {
-                    (ObjectKind::List, ObjectData::List(_start, len)) => unsafe {
+                    (ObjectKind::List, ObjectData::List(_start, len, _alloc)) => unsafe {
                         for _ in 0..*len {
                             vm.counter = pc;
                             vm.run_block(FrameKind::DoForInLoop);
@@ -370,7 +370,7 @@ impl Operation {
                     },
                     (ObjectKind::Iterator, ObjectData::Iterator(list_ptr, _next)) => unsafe {
                         let list = *list_ptr;
-                        if let ObjectData::List(_start, len) = list {
+                        if let ObjectData::List(_start, len, _alloc) = list {
                             for _ in 0..*len {
                                 vm.counter = pc;
                                 vm.run_block(FrameKind::DoForInLoop);
@@ -393,12 +393,17 @@ impl Operation {
             Operation::CreateList(maybe_num) => unsafe {
                 // create an empty list
                 let len = Box::new(0);
+                let alloc = Box::new(0);
                 let random_addr = Box::new(vm.memory.start().addr());
                 let obj = Object {
                     kind: ObjectKind::List,
-                    data: ObjectData::List(Box::into_raw(random_addr), Box::into_raw(len)),
+                    data: ObjectData::List(
+                        Box::into_raw(random_addr),
+                        Box::into_raw(len),
+                        Box::into_raw(alloc),
+                    ),
                 };
-                let obj: &'static mut Object = vm.register_single_mut(obj);
+                let obj: MutableObject = vm.register_single_mut(obj);
 
                 let num = match maybe_num {
                     Some(v) => *v,
@@ -412,9 +417,10 @@ impl Operation {
                 if objects.len() > 0 {
                     let objects: &'static [Object] = vm.register_many(objects.as_slice());
                     let obj_ptr = objects.as_ptr();
-                    if let ObjectData::List(ref mut start, ref mut len) = obj.data {
+                    if let ObjectData::List(ref mut start, ref mut len, ref mut alloc) = obj.data {
                         **len = objects.len();
                         **start = obj_ptr.addr();
+                        **alloc = objects.len();
                     }
                 }
                 vm.obj_stack.push(obj);
@@ -429,30 +435,18 @@ impl Operation {
                 match { vm.obj_stack.pop_mut() } {
                     Ok(mut t) => {
                         let Object { kind, mut data } = &mut t;
-                        if let ObjectData::List(ref mut start, ref mut len) = data {
-                            let starting_obj = dbg!(**start as *const Object);
-
-                            let pretend_ptr = (**start as *const Object).add(**len).addr();
-                            if dbg!(pretend_ptr as *const Object)
-                                == dbg!(vm.memory.start().addr() as *const Object)
-                            {
-                                **len += 1;
-                                vm.register_single(new_item);
-                            } else {
-                                vm.exit(Some(1));
-                                println!("new list");
-                                let mut objects: Vec<Object> = vec![];
-                                for i in 0..**len {
-                                    let obj = starting_obj.add(i);
-                                    objects.push(*obj.clone());
-                                    vm.drop(&*obj);
-                                }
-                                objects.push(new_item);
-                                let objects: &'static [Object] = vm.register_many(&objects);
-                                let new_start = start.with_addr(objects.as_ptr().addr());
+                        if let ObjectData::List(ref mut start, ref mut len, ref mut alloc) = data {
+                            let start_ptr = **start as *mut Object;
+                            let new_len = **len + 1;
+                            if **alloc < new_len {
+                                let new_start =
+                                    vm.resize_list(start_ptr, **len, **alloc, new_len)?;
                                 **start = new_start as usize;
-                                **len += 1;
+                                **alloc = new_len;
                             }
+                            let new_item_ptr = start_ptr.add(**len);
+                            *new_item_ptr = new_item;
+                            **len = new_len;
                         } else {
                             return Err(ProgramError(
                                 ProgramErrorKind::TypeError(ObjectKind::List, *kind),
@@ -492,7 +486,7 @@ impl Operation {
                     Err(e) => vm.error(e),
                 }?;
                 match (list_obj.kind, list_obj.data) {
-                    (ObjectKind::List, ObjectData::List(start, len)) => unsafe {
+                    (ObjectKind::List, ObjectData::List(start, len, _alloc)) => unsafe {
                         let start = *start as *const Object;
                         if idx < *len {
                             let obj_ptr = start.add(idx);
@@ -539,7 +533,7 @@ impl Operation {
                 let obj = objects[0];
 
                 match (list_obj.kind, list_obj.data) {
-                    (ObjectKind::List, ObjectData::List(start, len)) => {
+                    (ObjectKind::List, ObjectData::List(start, len, _alloc)) => {
                         let start = *start as *const Object;
                         if idx < *len {
                             let entry = start.add(idx) as *mut Object;
@@ -552,38 +546,79 @@ impl Operation {
                     (kind, _) => vm.error(ProgramErrorKind::TypeError(ObjectKind::List, kind)),
                 }
             },
-            Operation::PushRange => {
-                let steps = vm.obj_stack.pop();
-                let end = vm.obj_stack.pop();
-                let start = vm.obj_stack.pop();
-                match (start, end, steps) {
-                    (Ok(strt), Ok(nd), Ok(stps)) => match (strt.data, nd.data, stps.data) {
-                        (
-                            ObjectData::Integer(s),
-                            ObjectData::Integer(n),
-                            ObjectData::Integer(ps),
-                        ) => {
-                            let p: usize = match ps.try_into() {
-                                Ok(v) => v,
-                                Err(_) => return vm.error(ProgramErrorKind::IntegerToUnsigned),
-                            };
-                            let values = (s..n)
-                                .step_by(p)
-                                .map(|v| Object {
-                                    kind: ObjectKind::Integer,
-                                    data: ObjectData::Integer(v),
-                                })
-                                .collect::<Vec<Object>>();
-                            if values.len() > 0 {
-                                let values: &'static [Object] = vm.register_many(&values);
-                                values.iter().for_each(|v| vm.obj_stack.push(v));
-                            }
-                            Ok(())
+            Operation::ListAlloc(maybe_num) => unsafe {
+                let num = match maybe_num {
+                    Some(v) => *v,
+                    None => {
+                        let obj = vm.obj_stack.pop();
+                        match obj {
+                            Ok(v) => match v.as_tuple() {
+                                (ObjectKind::Integer, ObjectData::Integer(n)) => {
+                                    utils::isize_to_usize(n)
+                                }
+                                (kind, _data) => {
+                                    return vm.error(ProgramErrorKind::TypeError(
+                                        ObjectKind::Integer,
+                                        kind,
+                                    ))
+                                }
+                            },
+
+                            Err(e) => return vm.error(e),
                         }
-                        _ => todo!(),
-                    },
-                    _ => todo!(),
+                    }
+                };
+                println!("{num}");
+                match { vm.obj_stack.pop_mut() } {
+                    Ok(mut t) => {
+                        let Object { kind, mut data } = &mut t;
+                        if let ObjectData::List(ref mut start, ref mut len, ref mut alloc) = data {
+                            let to_alloc = **alloc + num;
+                            **start =
+                                vm.resize_list(**start as *mut Object, **len, **alloc, to_alloc)?
+                                    as usize;
+
+                            if **alloc < to_alloc {
+                                **alloc = to_alloc;
+                            }
+                        } else {
+                            return Err(ProgramError(
+                                ProgramErrorKind::TypeError(ObjectKind::List, *kind),
+                                vm.current_span.clone(),
+                            ));
+                        }
+                    }
+                    Err(_) => vm.error(ProgramErrorKind::StackError(1))?,
                 }
+
+                Ok(())
+            },
+            Operation::PushRange => {
+                let (steps, end, start) = match unsafe { vm.obj_stack.pop_n(3) } {
+                    Ok(xs) => (xs[2], xs[1], xs[0]),
+                    Err(e) => vm.error(e)?,
+                };
+                match (start.data, end.data, steps.data) {
+                    (ObjectData::Integer(s), ObjectData::Integer(n), ObjectData::Integer(ps)) => {
+                        let p: usize = match ps.try_into() {
+                            Ok(v) => v,
+                            Err(_) => return vm.error(ProgramErrorKind::IntegerToUnsigned),
+                        };
+                        let values = (s..n)
+                            .step_by(p)
+                            .map(|v| Object {
+                                kind: ObjectKind::Integer,
+                                data: ObjectData::Integer(v),
+                            })
+                            .collect::<Vec<Object>>();
+                        if values.len() > 0 {
+                            let values: &'static [Object] = vm.register_many(&values);
+                            values.iter().for_each(|v| vm.obj_stack.push(v));
+                        }
+                        return Ok(());
+                    }
+                    _ => todo!(),
+                };
             }
             Operation::ReturnIfConst(name) => {
                 let b = {
@@ -617,7 +652,7 @@ impl Operation {
                 Ok(())
             }
             Operation::GetPtr => {
-                let obj: &'static Object = {
+                let obj: RegObject = {
                     match { vm.obj_stack.pop() } {
                         Ok(t) => Ok(t),
                         Err(_) => vm.error(ProgramErrorKind::StackError(1)),
@@ -630,13 +665,13 @@ impl Operation {
                         data: ObjectData::Pointer(&mut &*obj as *mut &Object),
                     }
                 };
-                let ptr_obj: &'static Object = vm.register_single(ptr_obj);
+                let ptr_obj: RegObject = vm.register_single(ptr_obj);
                 vm.obj_stack.push(ptr_obj);
 
                 Ok(())
             }
             Operation::ReadPtr => {
-                let ptr_obj: &'static Object = {
+                let ptr_obj: RegObject = {
                     match { vm.obj_stack.pop() } {
                         Ok(t) => Ok(t),
                         Err(_) => vm.error(ProgramErrorKind::StackError(1)),
@@ -644,7 +679,7 @@ impl Operation {
                 }?;
 
                 if let ObjectData::Pointer(real_ptr) = ptr_obj.data {
-                    let val: &'static Object = unsafe { real_ptr.read() };
+                    let val: RegObject = unsafe { real_ptr.read() };
                     vm.obj_stack.push(val);
                 } else {
                     return vm.error(ProgramErrorKind::TypeError(
@@ -677,7 +712,7 @@ impl Operation {
                 Ok(())
             },
             Operation::GetIter => {
-                let list_obj: &'static Object = {
+                let list_obj: RegObject = {
                     match { vm.obj_stack.pop() } {
                         Ok(t) => Ok(t),
                         Err(_) => vm.error(ProgramErrorKind::StackError(1)),
@@ -692,7 +727,7 @@ impl Operation {
                             Box::into_raw(initial_index),
                         ),
                     };
-                    let iter_obj: &'static Object = vm.register_single(iter_obj);
+                    let iter_obj: RegObject = vm.register_single(iter_obj);
                     vm.obj_stack.push(iter_obj);
                 } else {
                     return vm.error(ProgramErrorKind::TypeError(ObjectKind::List, list_obj.kind));
@@ -709,7 +744,7 @@ impl Operation {
 
                 if let ObjectData::Iterator(list_ptr, ref mut next) = data {
                     let list = *list_ptr;
-                    if let ObjectData::List(start, len) = list {
+                    if let ObjectData::List(start, len, _alloc) = list {
                         let start = *start as *const Object;
                         vm.obj_stack.push(&*start.add(**next));
                         if **next < *len {
@@ -734,7 +769,7 @@ impl Operation {
 
                 if let ObjectData::Iterator(list_ptr, ref mut next) = data {
                     let list = *list_ptr;
-                    if let ObjectData::List(start, len) = list {
+                    if let ObjectData::List(start, len, _alloc) = list {
                         let start = *start as *const Object;
                         let cur_val = **next;
                         if cur_val == *len {
@@ -770,7 +805,7 @@ impl Operation {
                         kind: ObjectKind::Integer,
                         data: ObjectData::Integer(val as isize),
                     };
-                    let obj: &'static Object = vm.register_single(obj);
+                    let obj: RegObject = vm.register_single(obj);
                     vm.obj_stack.push(obj);
                 } else {
                     return vm.error(ProgramErrorKind::TypeError(ObjectKind::Iterator, *kind));
@@ -786,7 +821,7 @@ impl Operation {
                 }?;
                 if let ObjectData::Iterator(list_ptr, next) = data {
                     let list = **list_ptr;
-                    if let ObjectData::List(start, len) = list {
+                    if let ObjectData::List(start, len, _alloc) = list {
                         if *len != 0 && **next < *len {
                             let start = *start as *const Object;
                             let pc = vm.counter.clone();

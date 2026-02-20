@@ -6,6 +6,9 @@ func main 0
 	push_range
 	create_list 5
 	store_name num
+
+	push_name num
+	list_alloc 2
 	
 	store_temp
 	push_name num
