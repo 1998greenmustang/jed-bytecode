@@ -22,5 +22,5 @@ done
 func main 0
 	push_lit 14
 	call fib
-	call_builtin println
+	call_built_in println
 done

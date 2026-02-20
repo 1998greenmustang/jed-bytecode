@@ -34,13 +34,13 @@ func main 0
 		list_get
 		call fib
 		push_lit "get"
-		call_builtin println
+		call_built_in println
 
 		push_name nums
 		push_name i
 		list_set
 		push_lit "set"
-		call_builtin println
+		call_built_in println
 			
 		push_name i
 		push_lit 1
@@ -50,5 +50,5 @@ func main 0
 
 	push_name nums
 	push_name nums
-	call_builtin println
+	call_built_in println
 done

@@ -5,7 +5,7 @@ func main 0
 	push_lit 10
 	do_for
 		push_name i
-		call_builtin println
+		call_built_in println
 
 		push_name i
 		push_lit 1
