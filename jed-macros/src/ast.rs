@@ -6,6 +6,7 @@ use crate::{is_group, is_ident, is_punct};
 
 pub(crate) type Ast = Vec<AstEntry>;
 
+#[allow(dead_code, unused)]
 #[derive(Clone, Debug)]
 pub enum AstEntry {
     Enum(String, Vec<AstEntry>),
@@ -33,6 +34,7 @@ pub(crate) type AstKind = String;
 
 type AstResult<T> = Result<T, AstError>;
 
+#[allow(dead_code, unused)]
 #[derive(Debug)]
 pub enum AstError {
     TodoError(String),

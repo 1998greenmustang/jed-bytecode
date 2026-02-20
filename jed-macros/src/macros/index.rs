@@ -9,7 +9,7 @@ pub fn index_to_name<T: Fn(&String) -> String>(ast: Ast, name_fn: T) -> TokenStr
     if let Some(AstEntry::Enum(name, ast)) = ast.first() {
         let variants = ast.iter().filter(|x| matches!(x, AstEntry::Variant(_, _)));
         for (i, v) in variants.enumerate() {
-            if let AstEntry::Variant(vname, tpl) = v {
+            if let AstEntry::Variant(vname, _tpl) = v {
                 idx_stmts.push(format!("{i} => \"{}\"", name_fn(vname)))
             }
         }
@@ -39,7 +39,7 @@ pub fn name_to_index<T: Fn(&String) -> String>(ast: Ast, name_fn: T) -> TokenStr
     if let Some(AstEntry::Enum(name, ast)) = ast.first() {
         let variants = ast.iter().filter(|x| matches!(x, AstEntry::Variant(_, _)));
         for (i, v) in variants.enumerate() {
-            if let AstEntry::Variant(vname, tpl) = v {
+            if let AstEntry::Variant(vname, _tpl) = v {
                 idx_stmts.push(format!("\"{}\" => {i}", name_fn(vname)))
             }
         }
@@ -66,7 +66,6 @@ impl {} {{
 type IndexedVariant = (usize, String);
 
 struct FromStructure {
-    kind: String,
     constructor: String,
     variants: Vec<IndexedVariant>,
 }
@@ -106,7 +105,6 @@ pub fn index_froms(ast: Ast) -> TokenStream {
                         + ")"
                 };
                 if let Some(FromStructure {
-                    kind: _,
                     constructor: _,
                     variants: vs,
                 }) = kinds.get_mut(&kind)
@@ -129,7 +127,6 @@ pub fn index_froms(ast: Ast) -> TokenStream {
                     kinds.insert(
                         kind.clone(),
                         FromStructure {
-                            kind,
                             constructor,
                             variants: vec![(i, vname.clone())],
                         },

@@ -4,7 +4,7 @@ use crate::{
     binops::BinOpKind,
     object::{ObjectData, ObjectKind},
     span::Span,
-    utils,
+    utils::{self, bytes_to_string},
 };
 
 #[derive(Debug, Clone)]
@@ -71,7 +71,9 @@ impl Display for ProgramErrorKind {
                 write!(f, "can not get next in a list of {} length", len)
             }
             ProgramErrorKind::IterPrevious => write!(f, "can not get previous",),
-            ProgramErrorKind::ConstantExists(bytes) => todo!(),
+            ProgramErrorKind::ConstantExists(bytes) => {
+                write!(f, "constant '{}' does not exist", bytes_to_string(bytes))
+            }
             ProgramErrorKind::TodoError => {
                 write!(f, "there is an error here, but im not sure what it is")
             }

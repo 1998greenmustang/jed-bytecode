@@ -54,8 +54,8 @@ impl From<u8> for BuiltIn {
 fn object_sqrt(obj: Object) -> Object {
     match obj.data {
         ObjectData::Integer(i) => i.isqrt().into(),
-        ObjectData::Float(i, p) => todo!(),
-        ObjectData::UnsignedInt(i) => todo!(),
+        ObjectData::Float(_i, _pp) => todo!(),
+        ObjectData::UnsignedInt(_i) => todo!(),
         _ => panic!(),
     }
 }

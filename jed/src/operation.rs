@@ -900,27 +900,27 @@ impl Operation {
                     Err(e) => vm.error(e),
                 }?;
                 println!("object stack: {:?}", objs);
-                // println!("call stack: {:?}", frames);
+                println!("call stack: {:?}", frames);
                 Ok(())
             }
-            Operation::Import(bytes) => {
-                // if MODULES.contains(bytes) {
-                //     if vm.debug {
-                //         println!(
-                //             "DEBUG: Using the internal module '{}'",
-                //             bytes_to_string(bytes)
-                //         );
-                //         println!("DEBUG: If this isn't what you meant to do, rename your module");
-                //     }
-                //     // wait this isnt anything
-                //     // ig if i do syscall things
-                //     // but
-                //     let module: &[Operation] = modules::get_module(bytes);
-                //     vm.program.import_module(module);
-                // } else {
-                // }
-                Ok(())
-            }
+            // Operation::Import(bytes) => {
+            // if MODULES.contains(bytes) {
+            //     if vm.debug {
+            //         println!(
+            //             "DEBUG: Using the internal module '{}'",
+            //             bytes_to_string(bytes)
+            //         );
+            //         println!("DEBUG: If this isn't what you meant to do, rename your module");
+            //     }
+            //     // wait this isnt anything
+            //     // ig if i do syscall things
+            //     // but
+            //     let module: &[Operation] = modules::get_module(bytes);
+            //     vm.program.import_module(module);
+            // } else {
+            // }
+            //     Ok(())
+            // }
             _ => todo!("{}", self),
         }
     }

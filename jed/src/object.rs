@@ -1,5 +1,4 @@
 use std::{
-    convert::TryFrom,
     fmt::{Debug, Display},
     u8,
 };
@@ -23,18 +22,6 @@ pub enum ObjectKind {
     Iterator,
 }
 
-impl TryFrom<&u8> for ObjectKind {
-    type Error = &'static str;
-
-    fn try_from(value: &u8) -> Result<Self, Self::Error> {
-        if value > &7 {
-            return Err("not a valid kind");
-        } else {
-            return Ok(unsafe { std::mem::transmute(*value) });
-        }
-    }
-}
-
 #[derive(Hash, PartialEq, Eq, Debug, Copy, Clone, PartialOrd, Ord)]
 pub struct Object {
     pub kind: ObjectKind,
@@ -50,7 +37,7 @@ pub enum ObjectData {
     Bool(bool),
     Func(&'static [u8]),
     List(*mut usize, *mut usize, *mut usize), // pointer address to the starting object, end, allocated
-    Pointer(*mut &'static Object),
+    Pointer(*mut RegObject),
     Iterator(*const ObjectData, *mut usize), // start, next
     Nil,
 }
@@ -77,9 +64,9 @@ impl Debug for ObjectData {
             ObjectData::List(start, len, _alloc) => unsafe {
                 write!(f, "list (@{:p}, {})", **start as *const Object, **len)
             },
-            ObjectData::Iterator(list, next) => unsafe {
+            ObjectData::Iterator(list, next) => {
                 write!(f, "iterate (@{:?}, next: {:?})", list, next)
-            },
+            }
         }
     }
 }
@@ -108,7 +95,7 @@ impl Display for ObjectData {
                 }
                 write!(f, "]")
             },
-            ObjectData::Iterator(list_ptr, next) => unsafe { write!(f, "<iterator>",) },
+            ObjectData::Iterator(_list_ptr, _next) => write!(f, "<iterator>",),
         }
     }
 }

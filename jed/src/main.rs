@@ -5,8 +5,6 @@ mod binops;
 mod builtin;
 mod error;
 mod frame;
-mod indexmap;
-mod map;
 mod modules;
 mod object;
 mod operation;

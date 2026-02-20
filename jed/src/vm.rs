@@ -5,7 +5,7 @@ use crate::{
     binops::{self, BinOpKind},
     error::{ProgramError, ProgramErrorKind},
     frame::{Frame, FrameKind},
-    object::{MutableObject, Object, ObjectData, ObjectKind, RegObject},
+    object::{MutableObject, Object, RegObject},
     operation::Operation,
     program::Program,
     span::Span,
