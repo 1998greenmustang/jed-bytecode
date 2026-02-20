@@ -5,7 +5,7 @@ use crate::{
     binops::{self, BinOpKind},
     error::{ProgramError, ProgramErrorKind},
     frame::{Frame, FrameKind},
-    object::Object,
+    object::{MutableObject, Object, RegObject},
     operation::Operation,
     program::Program,
     span::Span,
@@ -15,11 +15,11 @@ use crate::{
 
 pub struct VM {
     pub program: Program,
-    pub consts: HashMap<&'static [u8], &'static Object>,
+    pub consts: HashMap<&'static [u8], RegObject>,
     pub counter: usize,
     pub call_stack: Stack<Frame>,
-    pub obj_stack: Stack<&'static Object>,
-    pub temp: Option<&'static Object>,
+    pub obj_stack: Stack<RegObject>,
+    pub temp: Option<RegObject>,
     pub memory: arena::Manual<Object>,
     pub current_span: Span,
     pub debug: bool,
@@ -43,11 +43,10 @@ impl VM {
         }
     }
 
-    pub fn register_single(&mut self, obj: Object) -> &'static Object {
-        println!("registering {}", obj);
+    pub fn register_single(&mut self, obj: Object) -> RegObject {
         unsafe { self.register_many([obj].as_slice()).get_unchecked(0) }
     }
-    pub fn register_single_mut(&mut self, obj: Object) -> &'static mut Object {
+    pub fn register_single_mut(&mut self, obj: Object) -> MutableObject {
         let saved_bytes = self.memory.alloc_slice(&[obj]);
         let saved_bytes: &'static mut [Object] = unsafe { &mut *(saved_bytes as *mut [Object]) };
         unsafe { saved_bytes.get_unchecked_mut(0) }
@@ -59,7 +58,44 @@ impl VM {
         saved_bytes
     }
 
-    pub fn drop(&mut self, obj: &'static Object) {
+    pub unsafe fn resize_list(
+        &mut self,
+        starting_ptr: *mut Object,
+        len: usize,
+        alloc: usize,
+        n: usize,
+    ) -> Result<*const Object, ProgramError> {
+        if n <= alloc {
+            // shrink it baby
+            // i dont actually want to do
+            // because i do not care
+            return Ok(starting_ptr);
+        } else if n > alloc {
+            // grow it baby
+            let amt_to_alloc = n - alloc;
+            let pretend_ptr = starting_ptr.add(1).addr() as *const Object;
+            if pretend_ptr == self.memory.start().addr() as *const Object {
+                self.memory.extend_from(starting_ptr, amt_to_alloc);
+                return Ok(starting_ptr);
+            } else {
+                // create new list
+                let mut objects: Vec<Object> = vec![];
+                for i in 0..len {
+                    let obj = starting_ptr.add(i);
+                    objects.push(*obj.clone());
+                    self.drop(&*obj);
+                }
+                while objects.len() != n {
+                    objects.push(Object::nil());
+                }
+                let objects: &'static [Object] = self.register_many(&objects);
+                return Ok(objects.as_ptr());
+            }
+        }
+        self.error(ProgramErrorKind::TodoError)
+    }
+
+    pub fn drop(&mut self, obj: RegObject) {
         self.memory.deallocate(
             obj as *const Object as *mut Object,
             std::alloc::Layout::for_value(obj),
@@ -75,11 +111,11 @@ impl VM {
     }
 
     pub fn store_const(&mut self, name: &'static [u8], obj: Object) {
-        let obj: &'static Object = self.register_single(obj);
+        let obj: RegObject = self.register_single(obj);
         self.consts.insert(name, obj);
     }
 
-    pub fn get_const(&self, name: &'static [u8]) -> Option<&'static Object> {
+    pub fn get_const(&self, name: &'static [u8]) -> Option<RegObject> {
         self.consts.get(name).map(|v| &**v)
     }
 

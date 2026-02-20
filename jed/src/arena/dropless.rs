@@ -41,7 +41,7 @@ impl Dropless {
         // still fitting in a `layout` allocation.
         let additional = layout.size() + cmp::max(DROPLESS_ALIGNMENT, layout.align()) - 1;
 
-        unsafe {
+        {
             let mut chunks = self.chunks.borrow_mut();
             let mut new_cap;
             if let Some(last_chunk) = chunks.last_mut() {

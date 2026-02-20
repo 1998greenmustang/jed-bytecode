@@ -1,0 +1,89 @@
+func main 0
+	push_lit 10000
+	store_name n
+
+# create prime list 
+	create_list
+	store_name prime
+	push_name prime
+	push_name n
+	push_lit 1
+	bin_op +
+	list_alloc
+
+	push_name n
+	push_lit 1
+	bin_op +
+	do_for
+		push_name prime
+		push_lit true
+		list_push
+	done
+	push_lit false
+	push_name prime
+	list_set 0
+	push_lit false
+	push_name prime
+	list_set 1
+# wow thats lot
+
+# falsify prime index
+	# range(2, math.sqrt(n) + 1)
+	push_lit 2
+	
+	push_name n
+	call_built_in sqrt
+	push_lit 1
+	bin_op +
+	
+	push_lit 1
+	
+	push_range
+	create_list
+	get_iter
+	iterate
+		store_temp
+		push_name prime
+		push_temp
+		list_get
+
+		push_temp
+		call_built_in println
+
+		do_if
+			push_temp
+			push_temp
+			bin_op *
+
+			push_name n
+			push_lit 1
+			bin_op +
+
+			push_temp
+			push_range
+			create_list
+			get_iter
+			iterate
+				store_temp
+				push_lit false
+				push_name prime
+				push_temp
+				list_set
+			done
+		done
+	done
+
+
+# print if prime
+	push_name prime
+	get_iter
+	store_name iter
+	push_name iter
+	iterate
+		do_if
+			push_name iter
+			iter_current
+			call_built_in println
+		done
+	done
+done

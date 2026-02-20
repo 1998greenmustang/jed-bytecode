@@ -1,6 +1,6 @@
-use std::{collections::HashMap, str::FromStr};
+use std::str::FromStr;
 
-use proc_macro::{Ident, TokenStream, TokenTree};
+use proc_macro::TokenStream;
 
 use crate::ast::{Ast, AstEntry};
 

@@ -174,11 +174,11 @@ impl Program {
                 break;
             }
             let op = Operation::from_index(&op_buffer[0]);
-            match op_buffer[0] {
+            match op {
                 // "bin_op"
                 // BinOpKind
                 // in file: u8
-                1 => {
+                "bin_op" => {
                     let mut binopbuffer: [u8; 1] = [0; 1];
                     reader.read(&mut binopbuffer[..])?;
                     program
@@ -188,18 +188,17 @@ impl Program {
                 // "call_builtin"
                 // BuiltIn
                 // in file: u8
-                3 => {
+                "call_builtin" => {
                     let mut builtinbuffer: [u8; 1] = [0; 1];
                     reader.read(&mut builtinbuffer[..])?;
                     program
                         .instructions
                         .push(Operation::CallBuiltIn(builtinbuffer[0].into()))
                 }
-                // "call", "push_lit", "push_name", "return_if", "store_const",
-                // "store_name", "do_for_in", "return_if_const"
                 // &'static [u8]
                 // in file: usize (length), [u8; length]
-                2 | 4 | 5 | 8 | 9 | 10 | 16 | 22 => {
+                "call" | "push_lit" | "push_name" | "return_if" | "store_const" | "store_name"
+                | "do_for_in" | "return_if_const" => {
                     let mut slice_length: [u8; size_of::<usize>()] = [0; size_of::<usize>()];
                     let n = reader.read(&mut slice_length[..])?;
                     assert_eq!(n, size_of::<usize>(), "did not receive enough data");
@@ -217,7 +216,7 @@ impl Program {
                 // create_list, list_get, list_set
                 // Option<usize>
                 // in file: Bool, usize
-                17 | 19 | 20 => {
+                "create_list" | "list_get" | "list_set" | "list_alloc" => {
                     let mut boolean: [u8; 1] = [0; 1];
                     let n = reader.read(&mut boolean[..])?;
                     assert_eq!(n, 1, "did not receive enough data");
@@ -237,7 +236,7 @@ impl Program {
                 // func
                 // &'static [u8], usize
                 // in file: usize (length), [u8; length]
-                12 => {
+                "func" => {
                     let mut slice_length: [u8; size_of::<usize>()] = [0; size_of::<usize>()];
                     let n = reader.read(&mut slice_length[..])?;
                     assert_eq!(n, size_of::<usize>(), "did not receive enough data");
@@ -261,11 +260,11 @@ impl Program {
                         .insert(name, (program.instructions.len(), arity));
                 }
 
-                // push_temp, pop, store_temp, done, exit, do_for, list_push, push_range,
-                // get_ptr, read_ptr, set_ptr, get_iter, iter_next, iter_prev, iter_skip,
-                // iter_current, iterate, do_if, debug
-                6 | 7 | 11 | 13 | 14 | 15 | 18 | 21 | 23 | 24 | 25 | 26 | 27 | 28 | 29 | 30
-                | 31 | 32 | 33 => program.instructions.push(op_buffer[0].into()),
+                "push_temp" | "pop" | "store_temp" | "done" | "exit" | "do_for" | "list_push"
+                | "push_range" | "get_ptr" | "read_ptr" | "set_ptr" | "get_iter" | "iter_next"
+                | "iter_prev" | "iter_skip" | "iter_current" | "iterate" | "do_if" | "debug " => {
+                    program.instructions.push(op_buffer[0].into())
+                }
                 _ => break,
             }
         }
@@ -390,7 +389,7 @@ impl Program {
 
             program.instructions.push(operation);
         }
-        
+
         let blocks: Vec<(usize, &Operation)> = program
             .instructions
             .iter()

@@ -15,12 +15,6 @@ struct Free<T> {
     size: usize,
 }
 
-impl<T> Free<T> {
-    unsafe fn end(&self) -> *mut T {
-        self.start.as_ptr().add(self.size) as *mut T
-    }
-}
-
 pub struct Manual<T = u8> {
     start: Cell<*mut T>,
     endaa: Cell<*mut T>,
@@ -42,8 +36,8 @@ impl<T> Default for Manual<T> {
 impl<T> Manual<T> {
     pub const ALIGN_OF_T: usize = align_of::<T>();
     pub const SIZE_OF_T: usize = size_of::<T>();
-    const PAGE_MAX_ENTRIES: usize = (PAGE / (Self::SIZE_OF_T + Self::ALIGN_OF_T - 1));
-    const HUGE_PAGE_MAX_ENTRIES: usize = (HUGE_PAGE / (Self::SIZE_OF_T + Self::ALIGN_OF_T - 1));
+    // const PAGE_MAX_ENTRIES: usize = (PAGE / (Self::SIZE_OF_T + Self::ALIGN_OF_T - 1));
+    // const HUGE_PAGE_MAX_ENTRIES: usize = (HUGE_PAGE / (Self::SIZE_OF_T + Self::ALIGN_OF_T - 1));
 
     fn update_chunks(&self, ptr: *mut T, entry_count: isize) {
         let mut chunks = self.chunks.borrow_mut();
@@ -62,7 +56,7 @@ impl<T> Manual<T> {
     /// find empty joints within the pages or append the bottom
     pub fn allocate(&self, layout: Layout) -> *mut T {
         assert_ne!(layout.size(), 0);
-        let entries = layout.size() / Self::SIZE_OF_T;
+        // let entries = layout.size() / Self::SIZE_OF_T;
         // Search through free memory
         let mut free = self.free.borrow_mut();
 
@@ -148,7 +142,7 @@ impl<T> Manual<T> {
                 "Cannot find the chunk being altered"
             );
             for chk in altered_chunks {
-                let chk_start = chk.start().addr();
+                // let chk_start = chk.start().addr();
                 // this chunk is being changed
                 // get the range being changed
                 // `start`..=`chk.end()` or `start`..=end
@@ -158,10 +152,7 @@ impl<T> Manual<T> {
                     let entries_count = size / Self::SIZE_OF_T + 1;
 
                     // dbg!(chk.entries, entries_count, size);
-                    chk.entries = chk
-                        .entries
-                        .checked_sub(entries_count)
-                        .unwrap_or_else(|| panic!("impossible deallocation"));
+                    chk.entries = chk.entries.checked_sub(entries_count).unwrap_or(0);
                     // dbg!(chk.entries);
                 } else {
                     unreachable!("i think i asserted enough")
@@ -188,6 +179,10 @@ impl<T> Manual<T> {
 
     pub fn start(&self) -> *mut T {
         self.start.get()
+    }
+
+    pub fn set_start(&mut self, val: *mut T) {
+        self.start.set(val)
     }
 
     pub fn grow(&self, layout: Layout) {
@@ -270,6 +265,12 @@ impl<T> Manual<T> {
             mem.copy_from(slice.as_ptr(), slice.len());
             return slice::from_raw_parts_mut(mem, slice.len());
         }
+    }
+
+    pub fn extend_from(&self, item: *mut T, n: usize) {
+        assert_eq!(item.addr(), self.start.get().addr());
+        self.start.set(unsafe { item.add(n) });
+        self.update_chunks(item, usize::cast_signed(n));
     }
 }
 

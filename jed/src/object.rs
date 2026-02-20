@@ -1,10 +1,12 @@
 use std::{
-    convert::TryFrom,
     fmt::{Debug, Display},
     u8,
 };
 
 use crate::utils;
+
+pub type MutableObject = &'static mut Object;
+pub type RegObject = &'static Object;
 
 #[repr(u8)]
 #[derive(Debug, Hash, Eq, PartialEq, Copy, Clone, PartialOrd, Ord)]
@@ -18,18 +20,6 @@ pub enum ObjectKind {
     Nil,
     List,
     Iterator,
-}
-
-impl TryFrom<&u8> for ObjectKind {
-    type Error = &'static str;
-
-    fn try_from(value: &u8) -> Result<Self, Self::Error> {
-        if value > &7 {
-            return Err("not a valid kind");
-        } else {
-            return Ok(unsafe { std::mem::transmute(*value) });
-        }
-    }
 }
 
 #[derive(Hash, PartialEq, Eq, Debug, Copy, Clone, PartialOrd, Ord)]
@@ -46,8 +36,8 @@ pub enum ObjectData {
     String(&'static [u8]),
     Bool(bool),
     Func(&'static [u8]),
-    List(*mut usize, *mut usize), // *mut usize), // pointer address to the starting object, end, allocated TODO
-    Pointer(*mut &'static Object),
+    List(*mut usize, *mut usize, *mut usize), // pointer address to the starting object, end, allocated
+    Pointer(*mut RegObject),
     Iterator(*const ObjectData, *mut usize), // start, next
     Nil,
 }
@@ -71,12 +61,12 @@ impl Debug for ObjectData {
             ObjectData::Func(items) => write!(f, "func ({})", utils::bytes_to_string(items)),
             ObjectData::Pointer(pr) => write!(f, "ptr ({pr:p})"),
             ObjectData::Nil => write!(f, "Nil"),
-            ObjectData::List(start, len) => unsafe {
+            ObjectData::List(start, len, _alloc) => unsafe {
                 write!(f, "list (@{:p}, {})", **start as *const Object, **len)
             },
-            ObjectData::Iterator(list, next) => unsafe {
+            ObjectData::Iterator(list, next) => {
                 write!(f, "iterate (@{:?}, next: {:?})", list, next)
-            },
+            }
         }
     }
 }
@@ -92,7 +82,7 @@ impl Display for ObjectData {
             ObjectData::Pointer(pr) => write!(f, "{pr:p}"),
             ObjectData::Nil => write!(f, "Nil"),
             ObjectData::UnsignedInt(_) => todo!(),
-            ObjectData::List(start, len) => unsafe {
+            ObjectData::List(start, len, _alloc) => unsafe {
                 let start = **start as *const Object;
                 write!(f, "[")?;
                 for idx in 0..**len {
@@ -105,7 +95,7 @@ impl Display for ObjectData {
                 }
                 write!(f, "]")
             },
-            ObjectData::Iterator(list_ptr, next) => unsafe { write!(f, "<iterator>",) },
+            ObjectData::Iterator(_list_ptr, _next) => write!(f, "<iterator>",),
         }
     }
 }

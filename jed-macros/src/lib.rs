@@ -3,7 +3,7 @@ mod ast;
 mod generators;
 mod macros;
 mod utils;
-use std::{collections::HashMap, str::FromStr};
+use std::str::FromStr;
 use utils::SnakeCase;
 
 use proc_macro::*;
@@ -12,32 +12,6 @@ use generators::*;
 use utils::*;
 
 use crate::macros::{enum_display::*, enum_exists::*, index};
-
-type OperationEntry = (usize, OperationDefinition);
-
-#[derive(Clone)]
-struct KindStuff {
-    kind: TokenTree,
-    display_func: Option<TokenTree>,
-    operations: Vec<OperationEntry>,
-}
-
-#[derive(Clone, Debug)]
-struct OperationDefinition {
-    iden: Ident,
-    kind: TokenTree,
-    snake_case: String,
-}
-
-impl OperationDefinition {
-    fn new(iden: Ident, kind: TokenTree) -> Self {
-        Self {
-            iden: iden.clone(),
-            kind,
-            snake_case: iden.to_snake_case(),
-        }
-    }
-}
 
 // #[derive(SnakeCaseDisplay)]
 // enum Test {
@@ -112,6 +86,5 @@ pub fn match_ops(stream: TokenStream) -> TokenStream {
         let _ = iter.next_if(|x| is_punct(x, ','));
     }
     outputs.push("_ => todo!(\"{}\", op)}".to_owned());
-    println!("{:?}", outputs);
     return TokenStream::from_str(&outputs.join("\n")).expect("comon");
 }

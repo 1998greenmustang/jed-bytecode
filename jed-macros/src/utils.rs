@@ -1,20 +1,6 @@
 use std::iter::Peekable;
 
-use proc_macro::{Delimiter, Ident, TokenStream, TokenTree, token_stream::IntoIter};
-
-// i want to test if its actually a 'kind'able identifier
-// but, that can be pretty complex i dont really want to deal with
-// so this just lets the rustc to check (meaning no good error message)
-pub fn is_kind(token: &TokenTree) -> bool {
-    match token {
-        TokenTree::Group(_) | TokenTree::Ident(_) => true,
-        _ => false,
-    }
-}
-
-pub fn tuple_count(kind: &String) -> usize {
-    kind.chars().filter(|&c| c == ',').count() + 1
-}
+use proc_macro::{Delimiter, Ident, TokenTree, token_stream::IntoIter};
 
 pub trait SnakeCase<T: ToString = Self>: ToString {
     fn to_snake_case(&self) -> String {
@@ -40,26 +26,6 @@ pub trait SnakeCase<T: ToString = Self>: ToString {
 impl SnakeCase<&String> for &String {}
 
 impl SnakeCase<Ident> for Ident {}
-
-pub fn empty_tuple(kind: &String) -> String {
-    if kind == "()" {
-        "".to_owned()
-    } else {
-        let underscores: Vec<&str> = (0..tuple_count(kind)).map(|_| "_").collect();
-        underscores.join(",")
-    }
-}
-
-pub fn get_deconstructor(kind: &String) -> String {
-    if kind == "()" {
-        "".to_owned()
-    } else {
-        let args: Vec<String> = (0..tuple_count(kind))
-            .map(|i| "a".to_owned() + &i.to_string())
-            .collect();
-        "(".to_owned() + &args.join(",") + ")"
-    }
-}
 
 pub fn is_punct(token: &TokenTree, punctor: char) -> bool {
     match token {

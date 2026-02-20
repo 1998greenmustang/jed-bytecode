@@ -14,10 +14,6 @@ pub fn display_option_usize(a: &Option<usize>) -> String {
     }
 }
 
-pub fn display_func(bytes: &[u8], n: &usize) -> String {
-    bytes_to_string(bytes) + &n.to_string()
-}
-
 pub fn unwrap_or_error<T>(
     option: Option<T>,
     kind: ProgramErrorKind,
@@ -57,20 +53,6 @@ pub fn string_is_float_like(str: String) -> bool {
     return has_dot;
 }
 
-pub fn unwrap_as_string_or<T>(option: Option<T>, or: &str) -> String
-where
-    T: ToString,
-{
-    match option {
-        Some(v) => v.to_string(),
-        None => or.to_owned(),
-    }
-}
-
 pub fn isize_to_usize(i: isize) -> usize {
-    unsafe { std::mem::transmute(i) }
-}
-
-pub fn bounded(min: usize, v: usize, max: usize) -> bool {
-    return v >= min && v <= max;
+    isize::cast_unsigned(i)
 }
