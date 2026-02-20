@@ -61,5 +61,5 @@ func main 0
 
 	push_name nums
 	push_name nums
-	call_builtin println
+	call_built_in println
 exit

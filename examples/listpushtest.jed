@@ -19,6 +19,6 @@ func main 0
 	push_name num
 	get_iter
 	iterate
-		call_builtin println
+		call_built_in println
 	done
 exit

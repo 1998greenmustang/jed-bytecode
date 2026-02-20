@@ -15,10 +15,7 @@ debug = true
 
 [dependencies]
 lexopt = "0.3.1"
-
-[[bench]]
-name = "benchmark"
-harness = false
+jed-macros = { path = "../jed-macros" }
 
 [dev-dependencies]
 criterion = "0.5.1"

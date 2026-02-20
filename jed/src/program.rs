@@ -4,6 +4,8 @@ use std::{
     io::{self, BufReader, Read, Write},
 };
 
+use jed_macros::match_ops;
+
 use crate::{
     arena::Dropless, error::ProgramErrorKind, object::Object, operation::Operation, utils,
     MAGIC_NUMBER,
@@ -144,6 +146,8 @@ impl Program {
         }
         Ok(())
     }
+
+    /// TODO
     /// Bytecode files look like
     /// [
     ///  jed_magicnumber ("jed"),
@@ -169,6 +173,7 @@ impl Program {
             if n != 1 {
                 break;
             }
+            let op = Operation::from_index(&op_buffer[0]);
             match op_buffer[0] {
                 // "bin_op"
                 // BinOpKind
@@ -328,66 +333,64 @@ impl Program {
 
             let arg = line_spl[1..].join(" ");
 
-            let op_code = Operation::get_opcode(op);
-            let operation = match op_code {
-                1 => Operation::BinOp(arg.as_str().into()),
-                2 => {
-                    let name = program.register(arg);
-                    match program.funcs.get(name) {
-                        Some(_) => Operation::Call(name),
-                        None => panic!(
-                            "Call to nonexistent function '{}'",
-                            utils::bytes_to_string(name)
-                        ),
-                    }
-                }
-                3 => Operation::CallBuiltIn(arg.as_str().into()),
-                4 => Operation::PushLit(program.register(arg)),
-                5 => Operation::PushName(program.register(arg)),
-                6 => Operation::PushTemp,
-                7 => Operation::Pop,
-                8 => Operation::ReturnIf(program.register(arg)),
-                9 => Operation::StoreConst(program.register(arg)),
-                10 => Operation::StoreName(program.register(arg)),
-                11 => Operation::StoreTemp,
-                12 => {
-                    let saved_name = program.register(line_spl[1].to_owned());
-                    let arity = line_spl[2]
-                        .parse::<usize>()
-                        .expect("arity is not a number or something");
-                    let idx = program.instructions.len();
-                    program.funcs.insert(saved_name, (idx, arity));
-                    Operation::Func(saved_name, arity)
-                }
-                13 => Operation::Done,
-                14 => Operation::Exit,
-                15 => Operation::DoFor,
-                16 => Operation::DoForIn(program.register(arg)),
-                17 => Operation::CreateList(utils::string_to_t(arg).ok()),
-                18 => Operation::ListPush,
-                19 => Operation::ListGet(utils::string_to_t(arg).ok()),
-                20 => Operation::ListSet(utils::string_to_t(arg).ok()),
-                21 => Operation::PushRange,
-                22 => Operation::ReturnIfConst(program.register(arg)),
-                23 => Operation::GetPtr,
-                24 => Operation::ReadPtr,
-                25 => Operation::SetPtr,
-                26 => Operation::GetIter,
-                27 => Operation::IterNext,
-                28 => Operation::IterPrev,
-                29 => Operation::IterSkip,
-                30 => Operation::IterCurrent,
-                31 => Operation::Iterate,
-                32 => Operation::DoIf,
-                33 => Operation::Debug,
-
-                0 | _ => panic!("No such operation '{}'", op),
+            let operation = {
+                match_ops!(
+                    // no argument
+                    {[
+                        Empty,
+                        Pop,
+                        Done,
+                        Exit,
+                        DoFor,
+                        PushTemp,
+                        StoreTemp,
+                        ListPush,
+                        PushRange,
+                        GetPtr,
+                        ReadPtr,
+                        SetPtr,
+                        GetIter,
+                        IterNext,
+                        IterPrev,
+                        IterSkip,
+                        IterCurrent,
+                        Iterate,
+                        DoIf,
+                        Debug
+                    ]},
+                    // single custom type arg
+                    {[BinOp, CallBuiltIn], arg.as_str().into()},
+                    // bytes
+                    {[PushLit, PushName, ReturnIf, StoreConst, StoreName, DoForIn, ReturnIfConst, Import],
+                        program.register(arg)},
+                    // option<usize>
+                    {[CreateList, ListAlloc, ListSet, ListGet],
+                        utils::string_to_t(arg).ok()                    },
+                    {Func, {
+                        let saved_name = program.register(line_spl[1].to_owned());
+                        let arity = line_spl[2]
+                            .parse::<usize>()
+                            .expect("arity is not a number or something");
+                        let idx = program.instructions.len();
+                        program.funcs.insert(saved_name, (idx, arity));
+                        Operation::Func(saved_name, arity)
+                    }},
+                    {Call, {
+                        let name = program.register(arg);
+                        match program.funcs.get(name) {
+                            Some(_) => Operation::Call(name),
+                            None => panic!(
+                                "Call to nonexistent function '{}'",
+                                utils::bytes_to_string(name)
+                            ),
+                        }
+                    }}
+                )
             };
+
             program.instructions.push(operation);
         }
-        // Get the Done address for each block
-        // Also I think this is dumb?
-        // But, hey it works.
+        
         let blocks: Vec<(usize, &Operation)> = program
             .instructions
             .iter()

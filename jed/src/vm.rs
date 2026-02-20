@@ -44,7 +44,13 @@ impl VM {
     }
 
     pub fn register_single(&mut self, obj: Object) -> &'static Object {
+        println!("registering {}", obj);
         unsafe { self.register_many([obj].as_slice()).get_unchecked(0) }
+    }
+    pub fn register_single_mut(&mut self, obj: Object) -> &'static mut Object {
+        let saved_bytes = self.memory.alloc_slice(&[obj]);
+        let saved_bytes: &'static mut [Object] = unsafe { &mut *(saved_bytes as *mut [Object]) };
+        unsafe { saved_bytes.get_unchecked_mut(0) }
     }
 
     pub fn register_many(&mut self, objs: &[Object]) -> &'static [Object] {

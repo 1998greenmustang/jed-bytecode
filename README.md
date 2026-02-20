@@ -35,7 +35,7 @@ or with `cargo run`:
 ```text
 func main 0
   push_lit "Hello world!"
-  call_builtin println
+  call_built_in println
 done
 ```
 
@@ -90,7 +90,7 @@ There is 1 truly internal types: `Func`. `Func` is essentially used as more of a
 | --- | --- | --- | --- |
 | bin_op       | Apply a binary operation on the top 2    | BinOp | 2 same-typed operands |
 | call         | Call a custom defined function           | Function name | Arguments (or not!) required of the function |
-| call_builtin | Call a builtin function (ie println)     | Function name | Arguments (or not!) required of the function |
+| call_built_in | Call a builtin function (ie println)     | Function name | Arguments (or not!) required of the function |
 | push_lit     | Push a literal to the stack              | Literal | - |
 | push_name    | Push a stored local to the stack         | Variable name | - |
 | push_temp    | Push the `temp` storage to the stack     | - | - |

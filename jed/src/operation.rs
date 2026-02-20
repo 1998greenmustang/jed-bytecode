@@ -1,20 +1,33 @@
 use std::{convert::TryInto, fmt::Display};
 
+use jed_macros::{
+    IndexFroms, IndexToSnakeCase, SnakeCaseDisplay, SnakeCaseExists, SnakeCaseToIndex,
+};
+
 use crate::{
     binops::BinOpKind,
     builtin::BuiltIn,
     error::{ProgramError, ProgramErrorKind},
     frame::{Frame, FrameKind},
-    modules::{self, MODULES},
     object::{Object, ObjectData, ObjectKind},
-    stack::Stack,
-    utils::{self, bytes_to_string},
+    utils::{self, bytes_to_string, display_option_usize},
     vm::VM,
 };
 
-#[derive(Copy, Clone, Debug)]
 #[repr(u8)]
+#[derive(
+    Copy,
+    Clone,
+    Debug,
+    SnakeCaseDisplay,
+    SnakeCaseToIndex,
+    IndexToSnakeCase,
+    SnakeCaseExists,
+    IndexFroms,
+)]
 pub enum Operation {
+    #[jed(type: Option<usize>, func: display_option_usize)]
+    #[jed(type: &'static [u8], func: bytes_to_string)]
     BinOp(BinOpKind),
     Call(&'static [u8]),
     CallBuiltIn(BuiltIn),
@@ -35,6 +48,7 @@ pub enum Operation {
     ListPush,
     ListGet(Option<usize>),
     ListSet(Option<usize>),
+    ListAlloc(Option<usize>),
     PushRange,
     ReturnIfConst(&'static [u8]),
     GetPtr,
@@ -52,232 +66,7 @@ pub enum Operation {
     Empty,
 }
 
-impl From<(u8, Option<usize>)> for Operation {
-    fn from(value: (u8, Option<usize>)) -> Self {
-        match value.0 {
-            17 => Operation::CreateList(value.1),
-            19 => Operation::ListGet(value.1),
-            20 => Operation::ListSet(value.1),
-            _ => panic!(),
-        }
-    }
-}
-
-impl From<(u8, &'static [u8])> for Operation {
-    fn from(value: (u8, &'static [u8])) -> Self {
-        match value.0 {
-            2 => Operation::Call(value.1),
-            4 => Operation::PushLit(value.1),
-            5 => Operation::PushName(value.1),
-            8 => Operation::ReturnIf(value.1),
-            9 => Operation::StoreConst(value.1),
-            10 => Operation::StoreName(value.1),
-            16 => Operation::DoForIn(value.1),
-            22 => Operation::ReturnIfConst(value.1),
-            31 => Operation::ReturnIfConst(value.1),
-            _ => panic!(),
-        }
-    }
-}
-
-impl From<u8> for Operation {
-    fn from(value: u8) -> Self {
-        match value {
-            6 => Operation::PushTemp,
-            7 => Operation::Pop,
-            11 => Operation::StoreTemp,
-            13 => Operation::Done,
-            14 => Operation::Exit,
-            15 => Operation::DoFor,
-            18 => Operation::ListPush,
-            21 => Operation::PushRange,
-            23 => Operation::GetPtr,
-            24 => Operation::ReadPtr,
-            25 => Operation::SetPtr,
-            26 => Operation::GetIter,
-            27 => Operation::IterNext,
-            28 => Operation::IterPrev,
-            29 => Operation::IterSkip,
-            30 => Operation::IterCurrent,
-            33 => Operation::Debug,
-            _ => panic!(),
-        }
-    }
-}
-
-impl From<Operation> for u8 {
-    fn from(value: Operation) -> Self {
-        match value {
-            Operation::BinOp(_) => 1,
-            Operation::Call(_) => 2,
-            Operation::CallBuiltIn(_) => 3,
-            Operation::PushLit(_) => 4,
-            Operation::PushName(_) => 5,
-            Operation::PushTemp => 6,
-            Operation::Pop => 7,
-            Operation::ReturnIf(_) => 8,
-            Operation::StoreConst(_) => 9,
-            Operation::StoreName(_) => 10,
-            Operation::StoreTemp => 11,
-            Operation::Func(_, _) => 12,
-            Operation::Done => 13,
-            Operation::Exit => 14,
-            Operation::DoFor => 15,
-            Operation::DoForIn(_) => 16,
-            Operation::CreateList(_) => 17,
-            Operation::ListPush => 18,
-            Operation::ListGet(_) => 19,
-            Operation::ListSet(_) => 20,
-            Operation::PushRange => 21,
-            Operation::ReturnIfConst(_) => 22,
-            Operation::GetPtr => 23,
-            Operation::ReadPtr => 24,
-            Operation::SetPtr => 25,
-            Operation::GetIter => 26,
-            Operation::IterNext => 27,
-            Operation::IterPrev => 28,
-            Operation::IterSkip => 29,
-            Operation::IterCurrent => 30,
-            Operation::Iterate => 31,
-            Operation::DoIf => 32,
-            Operation::Debug => 33,
-            Operation::Import(_) => 34,
-            Operation::Empty => todo!(),
-        }
-    }
-}
-
-impl Display for Operation {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Operation::BinOp(bin_op_kind) => write!(f, "bin_op {}", bin_op_kind),
-            Operation::Call(bytes) => write!(f, "call {}", bytes_to_string(bytes)),
-            Operation::CallBuiltIn(built_in) => write!(f, "call_builtin {}", built_in),
-            Operation::PushLit(bytes) => write!(f, "push_lit {}", bytes_to_string(bytes)),
-            Operation::PushName(bytes) => write!(f, "push_name {}", bytes_to_string(bytes)),
-            Operation::PushTemp => write!(f, "push_temp"),
-            Operation::Pop => write!(f, "pop"),
-            Operation::ReturnIf(bytes) => write!(f, "return_if {}", bytes_to_string(bytes)),
-            Operation::StoreConst(bytes) => write!(f, "store_const {}", bytes_to_string(bytes)),
-            Operation::StoreName(bytes) => write!(f, "store_name {}", bytes_to_string(bytes)),
-            Operation::StoreTemp => write!(f, "store_temp"),
-            Operation::Func(bytes, arity) => write!(f, "func {} {arity}", bytes_to_string(bytes)),
-            Operation::Done => write!(f, "done"),
-            Operation::Exit => write!(f, "exit"),
-            Operation::DoFor => write!(f, "do_for"),
-            Operation::DoForIn(bytes) => write!(f, "do_for_in {}", bytes_to_string(bytes)),
-            Operation::CreateList(idx) => {
-                write!(f, "create_list {}", utils::unwrap_as_string_or(*idx, ""))
-            }
-            Operation::ListPush => write!(f, "list_push"),
-            Operation::ListGet(idx) => {
-                write!(f, "list_get {}", utils::unwrap_as_string_or(*idx, ""))
-            }
-            Operation::ListSet(idx) => {
-                write!(f, "list_set {}", utils::unwrap_as_string_or(*idx, ""))
-            }
-            Operation::PushRange => write!(f, "push_range"),
-            Operation::ReturnIfConst(bytes) => {
-                write!(f, "return_if_const {}", bytes_to_string(bytes))
-            }
-            Operation::GetPtr => write!(f, "get_ptr"),
-            Operation::ReadPtr => write!(f, "read_ptr"),
-            Operation::SetPtr => write!(f, "set_ptr"),
-            Operation::GetIter => write!(f, "get_iter"),
-            Operation::IterNext => write!(f, "iter_next"),
-            Operation::IterPrev => write!(f, "iter_prev"),
-            Operation::IterSkip => write!(f, "iter_skip"),
-            Operation::IterCurrent => write!(f, "iter_current"),
-            Operation::Iterate => write!(f, "iterate"),
-            Operation::DoIf => write!(f, "do_if"),
-            Operation::Debug => write!(f, "debug"),
-            Operation::Import(bytes) => write!(f, "import {}", bytes_to_string(bytes)),
-            Operation::Empty => write!(f, ""),
-        }
-    }
-}
-
 impl Operation {
-    pub fn exists(s: &str) -> bool {
-        match s {
-            "bin_op" => true,
-            "call" => true,
-            "call_builtin" => true,
-            "push_lit" => true,
-            "push_name" => true,
-            "push_temp" => true,
-            "pop" => true,
-            "return_if" => true,
-            "store_const" => true,
-            "store_name" => true,
-            "store_temp" => true,
-            "func" => true,
-            "done" => true,
-            "exit" => true,
-            "do_for" => true,
-            "do_for_in" => true,
-            "create_list" => true,
-            "list_push" => true,
-            "list_get" => true,
-            "list_set" => true,
-            "push_range" => true,
-            "return_if_const" => true,
-            "get_ptr" => true,
-            "read_ptr" => true,
-            "set_ptr" => true,
-            "get_iter" => true,
-            "iter_next" => true,
-            "iter_prev" => true,
-            "iter_skip" => true,
-            "iter_current" => true,
-            "iterate" => true,
-            "do_if" => true,
-            "debug" => true,
-            "import" => true,
-            _ => false,
-        }
-    }
-
-    pub fn get_opcode(op: &str) -> usize {
-        match op {
-            "bin_op" => 1,
-            "call" => 2,
-            "call_builtin" => 3,
-            "push_lit" => 4,
-            "push_name" => 5,
-            "push_temp" => 6,
-            "pop" => 7,
-            "return_if" => 8,
-            "store_const" => 9,
-            "store_name" => 10,
-            "store_temp" => 11,
-            "func" => 12,
-            "done" => 13,
-            "exit" => 14,
-            "do_for" => 15,
-            "do_for_in" => 16,
-            "create_list" => 17,
-            "list_push" => 18,
-            "list_get" => 19,
-            "list_set" => 20,
-            "push_range" => 21,
-            "return_if_const" => 22,
-            "get_ptr" => 23,
-            "read_ptr" => 24,
-            "set_ptr" => 25,
-            "get_iter" => 26,
-            "iter_next" => 27,
-            "iter_prev" => 28,
-            "iter_skip" => 29,
-            "iter_current" => 30,
-            "iterate" => 31,
-            "do_if" => 32,
-            "debug" => 33,
-            "import" => 34,
-            _ => 0,
-        }
-    }
-
     pub fn call(&self, vm: &mut VM) -> Result<(), ProgramError> {
         match self {
             Operation::BinOp(bin_op_kind) => vm.handle_bin_op(*bin_op_kind),
@@ -601,41 +390,37 @@ impl Operation {
                 }
                 Ok(())
             }
-            Operation::CreateList(maybe_num) => {
+            Operation::CreateList(maybe_num) => unsafe {
+                // create an empty list
+                let len = Box::new(0);
+                let random_addr = Box::new(vm.memory.start().addr());
+                let obj = Object {
+                    kind: ObjectKind::List,
+                    data: ObjectData::List(Box::into_raw(random_addr), Box::into_raw(len)),
+                };
+                let obj: &'static mut Object = vm.register_single_mut(obj);
+
                 let num = match maybe_num {
                     Some(v) => *v,
                     None => vm.obj_stack.len(),
                 };
-                let pop_res = unsafe { vm.obj_stack.pop_n(num) };
+                let pop_res = vm.obj_stack.pop_n(num);
                 let objects: Vec<Object> = match pop_res {
                     Ok(objs) => objs.iter().map(|o| **o).collect(),
                     Err(e) => return vm.error(e),
                 };
                 if objects.len() > 0 {
                     let objects: &'static [Object] = vm.register_many(objects.as_slice());
-                    let len = Box::new(objects.len());
                     let obj_ptr = objects.as_ptr();
-                    let obj_ptr: Box<usize> = Box::new(obj_ptr.addr());
-                    let obj = Object {
-                        kind: ObjectKind::List,
-                        data: ObjectData::List(Box::into_raw(obj_ptr), Box::into_raw(len)),
-                    };
-                    let obj: &'static Object = vm.register_single(obj);
-
-                    vm.obj_stack.push(obj);
-                } else {
-                    let len = Box::new(0);
-                    let random_addr = Box::new(vm.memory.start().addr());
-                    let obj = Object {
-                        kind: ObjectKind::List,
-                        data: ObjectData::List(Box::into_raw(random_addr), Box::into_raw(len)),
-                    };
-                    let obj: &'static Object = vm.register_single(obj);
-                    vm.obj_stack.push(obj);
+                    if let ObjectData::List(ref mut start, ref mut len) = obj.data {
+                        **len = objects.len();
+                        **start = obj_ptr.addr();
+                    }
                 }
+                vm.obj_stack.push(obj);
 
                 Ok(())
-            }
+            },
             Operation::ListPush => unsafe {
                 let new_item = match vm.obj_stack.pop().cloned() {
                     Ok(t) => Ok(t),
@@ -645,13 +430,17 @@ impl Operation {
                     Ok(mut t) => {
                         let Object { kind, mut data } = &mut t;
                         if let ObjectData::List(ref mut start, ref mut len) = data {
-                            let starting_obj = **start as *const Object;
+                            let starting_obj = dbg!(**start as *const Object);
 
-                            let obj: &'static Object = vm.register_single(new_item);
-                            if start.add(**len) as *const Object == obj.as_ptr() {
+                            let pretend_ptr = (**start as *const Object).add(**len).addr();
+                            if dbg!(pretend_ptr as *const Object)
+                                == dbg!(vm.memory.start().addr() as *const Object)
+                            {
                                 **len += 1;
+                                vm.register_single(new_item);
                             } else {
-                                vm.drop(obj);
+                                vm.exit(Some(1));
+                                println!("new list");
                                 let mut objects: Vec<Object> = vec![];
                                 for i in 0..**len {
                                     let obj = starting_obj.add(i);

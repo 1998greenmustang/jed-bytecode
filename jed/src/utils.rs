@@ -7,6 +7,17 @@ pub fn bytes_to_string(bytes: &[u8]) -> String {
     }
 }
 
+pub fn display_option_usize(a: &Option<usize>) -> String {
+    match a {
+        Some(n) => n.to_string(),
+        None => "".to_owned(),
+    }
+}
+
+pub fn display_func(bytes: &[u8], n: &usize) -> String {
+    bytes_to_string(bytes) + &n.to_string()
+}
+
 pub fn unwrap_or_error<T>(
     option: Option<T>,
     kind: ProgramErrorKind,
