@@ -379,7 +379,7 @@ impl Operation {
                     },
 
                     (kind, _data) => {
-                        return vm.error(ProgramErrorKind::TypeError(ObjectKind::List, kind))
+                        return vm.error(ProgramErrorKind::TypeError(ObjectKind::List, kind));
                     }
                 }
                 let _ = vm.call_stack.pop();
@@ -433,8 +433,7 @@ impl Operation {
                     Err(e) => Err(ProgramError(e, vm.current_span.clone())),
                 }?;
                 match { vm.obj_stack.pop_mut() } {
-                    Ok(mut t) => {
-                        let Object { kind, mut data } = &mut t;
+                    Ok(&mut &Object { ref kind, mut data }) => {
                         if let ObjectData::List(ref mut start, ref mut len, ref mut alloc) = data {
                             let start_ptr = **start as *mut Object;
                             let new_len = **len + 1;
@@ -473,7 +472,7 @@ impl Operation {
                                     return vm.error(ProgramErrorKind::TypeError(
                                         ObjectKind::Integer,
                                         kind,
-                                    ))
+                                    ));
                                 }
                             },
 
@@ -496,7 +495,7 @@ impl Operation {
                         }
                     },
                     (kind, _data) => {
-                        return vm.error(ProgramErrorKind::TypeError(ObjectKind::List, kind))
+                        return vm.error(ProgramErrorKind::TypeError(ObjectKind::List, kind));
                     }
                 }
                 Ok(())
@@ -515,7 +514,7 @@ impl Operation {
                                     return vm.error(ProgramErrorKind::TypeError(
                                         ObjectKind::Integer,
                                         kind,
-                                    ))
+                                    ));
                                 }
                             },
 
@@ -560,7 +559,7 @@ impl Operation {
                                     return vm.error(ProgramErrorKind::TypeError(
                                         ObjectKind::Integer,
                                         kind,
-                                    ))
+                                    ));
                                 }
                             },
 
@@ -570,8 +569,7 @@ impl Operation {
                 };
                 println!("{num}");
                 match { vm.obj_stack.pop_mut() } {
-                    Ok(mut t) => {
-                        let Object { kind, mut data } = &mut t;
+                    Ok(&mut &Object { ref kind, mut data }) => {
                         if let ObjectData::List(ref mut start, ref mut len, ref mut alloc) = data {
                             let to_alloc = **alloc + num;
                             **start =
@@ -735,7 +733,7 @@ impl Operation {
                 Ok(())
             }
             Operation::IterNext => unsafe {
-                let Object { kind, mut data } = {
+                let &Object { kind, mut data } = {
                     match { vm.obj_stack.pop_mut() } {
                         Ok(&mut t) => Ok(t),
                         Err(_) => vm.error(ProgramErrorKind::StackError(1)),
@@ -754,13 +752,13 @@ impl Operation {
                         }
                     }
                 } else {
-                    return vm.error(ProgramErrorKind::TypeError(ObjectKind::Iterator, *kind));
+                    return vm.error(ProgramErrorKind::TypeError(ObjectKind::Iterator, kind));
                 }
 
                 Ok(())
             },
             Operation::IterPrev => unsafe {
-                let Object { kind, mut data } = {
+                let &Object { kind, mut data } = {
                     match { vm.obj_stack.pop_mut() } {
                         Ok(&mut t) => Ok(t),
                         Err(_) => vm.error(ProgramErrorKind::StackError(1)),
@@ -783,7 +781,7 @@ impl Operation {
                         }
                     }
                 } else {
-                    return vm.error(ProgramErrorKind::TypeError(ObjectKind::Iterator, *kind));
+                    return vm.error(ProgramErrorKind::TypeError(ObjectKind::Iterator, kind));
                 }
                 Ok(())
             },

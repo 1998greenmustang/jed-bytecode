@@ -58,7 +58,7 @@ impl VM {
         saved_bytes
     }
 
-    pub unsafe fn resize_list(
+    pub fn resize_list(
         &mut self,
         starting_ptr: *mut Object,
         len: usize,
@@ -73,23 +73,25 @@ impl VM {
         } else if n > alloc {
             // grow it baby
             let amt_to_alloc = n - alloc;
-            let pretend_ptr = starting_ptr.add(1).addr() as *const Object;
+            let pretend_ptr = unsafe { starting_ptr.add(1).addr() as *const Object };
             if pretend_ptr == self.memory.start().addr() as *const Object {
                 self.memory.extend_from(starting_ptr, amt_to_alloc);
                 return Ok(starting_ptr);
             } else {
-                // create new list
-                let mut objects: Vec<Object> = vec![];
-                for i in 0..len {
-                    let obj = starting_ptr.add(i);
-                    objects.push(*obj.clone());
-                    self.drop(&*obj);
+                unsafe {
+                    // create new list
+                    let mut objects: Vec<Object> = vec![];
+                    for i in 0..len {
+                        let obj = starting_ptr.add(i);
+                        objects.push(*obj.clone());
+                        self.drop(&*obj);
+                    }
+                    while objects.len() != n {
+                        objects.push(Object::nil());
+                    }
+                    let objects: &'static [Object] = self.register_many(&objects);
+                    return Ok(objects.as_ptr());
                 }
-                while objects.len() != n {
-                    objects.push(Object::nil());
-                }
-                let objects: &'static [Object] = self.register_many(&objects);
-                return Ok(objects.as_ptr());
             }
         }
         self.error(ProgramErrorKind::TodoError)

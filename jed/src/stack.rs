@@ -79,12 +79,14 @@ impl<T> Stack<T> {
     }
 
     pub unsafe fn pop_n(&mut self, n: usize) -> Result<&[T], ProgramErrorKind> {
-        if n > self.len {
-            Err(ProgramErrorKind::StackError(n))
-        } else {
-            let nth = &*self.ptr.as_ptr().add(self.len - n);
-            self.len -= n;
-            Ok(std::slice::from_raw_parts(nth, n))
+        unsafe {
+            if n > self.len {
+                Err(ProgramErrorKind::StackError(n))
+            } else {
+                let nth = &*self.ptr.as_ptr().add(self.len - n);
+                self.len -= n;
+                Ok(std::slice::from_raw_parts(nth, n))
+            }
         }
     }
 
@@ -122,18 +124,22 @@ impl<T> Stack<T> {
     }
 
     pub unsafe fn last_n(&self, n: usize) -> Result<&[T], ProgramErrorKind> {
-        if n > self.len {
-            Err(ProgramErrorKind::StackError(n))
-        } else {
-            let nth = &*self.ptr.as_ptr().add(self.len - n);
-            Ok(std::slice::from_raw_parts(nth, n))
+        unsafe {
+            if n > self.len {
+                Err(ProgramErrorKind::StackError(n))
+            } else {
+                let nth = &*self.ptr.as_ptr().add(self.len - n);
+                Ok(std::slice::from_raw_parts(nth, n))
+            }
         }
     }
 
     pub unsafe fn at_most_n(&self, n: usize) -> Result<&[T], ProgramErrorKind> {
-        let num = n.min(self.len);
-        let nth = &*self.ptr.as_ptr().add(self.len - num);
-        Ok(std::slice::from_raw_parts(nth, num))
+        unsafe {
+            let num = n.min(self.len);
+            let nth = &*self.ptr.as_ptr().add(self.len - num);
+            Ok(std::slice::from_raw_parts(nth, num))
+        }
     }
 }
 
