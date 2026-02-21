@@ -130,6 +130,11 @@ impl VM {
         Ok(Self::new(program, debug))
     }
 
+    pub fn from_ops(ops: Vec<Operation>, debug: bool) -> Self {
+        let program = Program::from_ops(ops);
+        Self::new(program, debug)
+    }
+
     pub fn run(&mut self) {
         self.counter = self.program.get_main();
         loop {

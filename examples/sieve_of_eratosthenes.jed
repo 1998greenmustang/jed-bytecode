@@ -1,31 +1,18 @@
 func main 0
-	push_lit 10000
+	push_lit 100000
 	store_name n
 
 # create prime list 
+	push_lit false
+	push_lit false
+	push_name n
+	push_lit 1
+	bin_op -
+	do_for
+		push_lit true
+	done
 	create_list
 	store_name prime
-	push_name prime
-	push_name n
-	push_lit 1
-	bin_op +
-	list_alloc
-
-	push_name n
-	push_lit 1
-	bin_op +
-	do_for
-		push_name prime
-		push_lit true
-		list_push
-	done
-	push_lit false
-	push_name prime
-	list_set 0
-	push_lit false
-	push_name prime
-	list_set 1
-# wow thats lot
 
 # falsify prime index
 	# range(2, math.sqrt(n) + 1)

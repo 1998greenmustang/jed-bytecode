@@ -317,6 +317,50 @@ impl Program {
 
         return Ok(program);
     }
+
+    pub fn from_ops(ops: Vec<Operation>) -> Self {
+        let mut program = Self::new();
+        program.instructions = ops;
+        let blocks: Vec<(usize, &Operation)> = program
+            .instructions
+            .iter()
+            .enumerate()
+            .filter(|(_, o)| match o {
+                Operation::Done | Operation::Exit => return true,
+                Operation::Func(_, _)
+                | Operation::DoFor
+                | Operation::DoForIn(_)
+                | Operation::Iterate
+                | Operation::DoIf => return true,
+                _ => return false,
+            })
+            .collect();
+
+        assert_eq!(
+            blocks.len() % 2,
+            0,
+            "bro some block aint closed {:?}",
+            blocks
+        );
+        let mut block_queue: Vec<usize> = vec![];
+        for (pc, op) in blocks.iter() {
+            match op {
+                Operation::Func(name, arity) => {
+                    program.funcs.insert(name, (*pc, *arity));
+                    block_queue.push(*pc);
+                }
+                Operation::DoFor | Operation::DoForIn(_) | Operation::Iterate | Operation::DoIf => {
+                    block_queue.push(*pc);
+                }
+                Operation::Done | Operation::Exit => {
+                    let block_pc = block_queue.pop().unwrap();
+                    program.block_returns.insert(block_pc, *pc);
+                }
+                _ => {}
+            };
+        }
+        return program;
+    }
     pub fn from_string(text: String) -> Self {
         let mut program = Self::new();
         for line in text.split('\n') {
