@@ -7,8 +7,8 @@ use std::{
 use jed_macros::match_ops;
 
 use crate::{
-    arena::Dropless, error::ProgramErrorKind, object::Object, operation::Operation, utils,
-    MAGIC_NUMBER,
+    MAGIC_NUMBER, arena::Dropless, error::ProgramErrorKind, object::Object, operation::Operation,
+    utils,
 };
 
 type Arity = usize;
@@ -43,14 +43,6 @@ impl Program {
         return program;
     }
 
-    pub fn get_main(&self) -> Index {
-        let main = self.saved_strings.get("main").unwrap();
-        let (idx, _) = self
-            .funcs
-            .get(main)
-            .unwrap_or_else(|| panic!("No main func!"));
-        return *idx;
-    }
     pub fn get_op(&self, idx: usize) -> &Operation {
         match self.instructions.get(idx) {
             Some(op) => op,
@@ -59,7 +51,7 @@ impl Program {
     }
 
     pub fn register_bytes(&mut self, byte_str: &[u8]) -> &'static [u8] {
-        let string = utils::bytes_to_string(byte_str);
+        let string = utils::display_bytes(byte_str);
         if let Some(saved) = self.saved_strings.get(&string) {
             return saved;
         } else {
@@ -99,14 +91,14 @@ impl Program {
         file.write(MAGIC_NUMBER)?;
         for op in self.instructions.clone() {
             match op {
-                Operation::BinOp(bin_op_kind) => {
+                Operation::BinaryOp(bin_op_kind) => {
                     let _ = file.write(&[op.into(), bin_op_kind as u8])?;
                 }
                 Operation::CallBuiltIn(built_in) => {
                     let _ = file.write(&[op.into(), built_in as u8])?;
                 }
-                Operation::Call(items)
-                | Operation::PushLit(items)
+                Operation::Call(mod_name, func_name) => todo!(),
+                Operation::PushLit(items)
                 | Operation::PushName(items)
                 | Operation::ReturnIf(items)
                 | Operation::ReturnIfConst(items)
@@ -183,7 +175,7 @@ impl Program {
                     reader.read(&mut binopbuffer[..])?;
                     program
                         .instructions
-                        .push(Operation::BinOp(binopbuffer[0].into()))
+                        .push(Operation::BinaryOp(binopbuffer[0].into()))
                 }
                 // "call_builtin"
                 // BuiltIn
@@ -402,13 +394,13 @@ impl Program {
                         Debug
                     ]},
                     // single custom type arg
-                    {[BinOp, CallBuiltIn], arg.as_str().into()},
+                    {[BinaryOp, CallBuiltIn, UnaryOp], arg.as_str().into()},
                     // bytes
                     {[PushLit, PushName, ReturnIf, StoreConst, StoreName, DoForIn, ReturnIfConst, Import],
                         program.register(arg)},
                     // option<usize>
                     {[CreateList, ListAlloc, ListSet, ListGet],
-                        utils::string_to_t(arg).ok()                    },
+                        utils::string_to_t(arg).ok()},
                     {Func, {
                         let saved_name = program.register(line_spl[1].to_owned());
                         let arity = line_spl[2]
@@ -419,13 +411,19 @@ impl Program {
                         Operation::Func(saved_name, arity)
                     }},
                     {Call, {
-                        let name = program.register(arg);
-                        match program.funcs.get(name) {
-                            Some(_) => Operation::Call(name),
-                            None => panic!(
-                                "Call to nonexistent function '{}'",
-                                utils::bytes_to_string(name)
-                            ),
+                        let split: Vec<&str> = arg.split(' ').filter(|x| x != &"").collect();
+                        match split.len() {
+                            2 => unsafe {
+                                let modname = program.register(split.get_unchecked(0).to_string());
+                                let funcname = program.register(split.get_unchecked(1).to_string());
+                                Operation::Call(Some(modname), Some(funcname))
+                            }
+                            1 => unsafe {
+                                let funcname = program.register(split.get_unchecked(0).to_string());
+                                Operation::Call(None, Some(funcname))
+                            }
+                            0 => Operation::Call(None, None),
+                            _ => panic!()
                         }
                     }}
                 )

@@ -4,7 +4,7 @@ use crate::{
     binops::BinOpKind,
     object::{ObjectData, ObjectKind},
     span::Span,
-    utils::{self, bytes_to_string},
+    utils::{self, display_bytes},
 };
 
 #[derive(Debug, Clone)]
@@ -41,12 +41,12 @@ impl Display for ProgramErrorKind {
             ProgramErrorKind::FunctionExists(items) => write!(
                 f,
                 "function '{}' does not exist",
-                utils::bytes_to_string(items)
+                utils::display_bytes(items)
             ),
             ProgramErrorKind::VariableExists(items) => write!(
                 f,
                 "variable '{}' does not exist",
-                utils::bytes_to_string(items)
+                utils::display_bytes(items)
             ),
             ProgramErrorKind::TempPush => write!(f, "no item found in temp register"),
             ProgramErrorKind::TypeError(wanted, given) => {
@@ -72,7 +72,7 @@ impl Display for ProgramErrorKind {
             }
             ProgramErrorKind::IterPrevious => write!(f, "can not get previous",),
             ProgramErrorKind::ConstantExists(bytes) => {
-                write!(f, "constant '{}' does not exist", bytes_to_string(bytes))
+                write!(f, "constant '{}' does not exist", display_bytes(bytes))
             }
             ProgramErrorKind::TodoError => {
                 write!(f, "there is an error here, but im not sure what it is")

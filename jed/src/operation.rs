@@ -9,8 +9,10 @@ use crate::{
     builtin::BuiltIn,
     error::{ProgramError, ProgramErrorKind},
     frame::{Frame, FrameKind},
+    modules,
     object::{MutableObject, Object, ObjectData, ObjectKind, RegObject},
-    utils::{self, bytes_to_string, display_option_usize},
+    unops::UnOpKind,
+    utils::{self, display_bytes, display_option_bytes, display_option_usize},
     vm::VM,
 };
 
@@ -27,9 +29,11 @@ use crate::{
 )]
 pub enum Operation {
     #[jed(type: Option<usize>, func: display_option_usize)]
-    #[jed(type: &'static [u8], func: bytes_to_string)]
-    BinOp(BinOpKind),
-    Call(&'static [u8]),
+    #[jed(type: &'static [u8], func: display_bytes)]
+    #[jed(type: Option<&'static [u8]>, func: display_option_bytes)]
+    BinaryOp(BinOpKind),
+    UnaryOp(UnOpKind),
+    Call(Option<&'static [u8]>, Option<&'static [u8]>),
     CallBuiltIn(BuiltIn),
     PushLit(&'static [u8]),
     PushName(&'static [u8]),
@@ -69,52 +73,39 @@ pub enum Operation {
 impl Operation {
     pub fn call(&self, vm: &mut VM) -> Result<(), ProgramError> {
         match self {
-            Operation::BinOp(bin_op_kind) => vm.handle_bin_op(*bin_op_kind),
-            Operation::Call(func) => {
-                let (func_ptr, arity) = vm.unwrap_or_error(
-                    vm.program.funcs.get(func).cloned(),
-                    ProgramErrorKind::FunctionExists(func),
-                )?;
-                let args = {
-                    match unsafe { vm.obj_stack.last_n(arity) } {
-                        Ok(ts) => Ok(ts),
-                        Err(_) => vm.error(ProgramErrorKind::StackError(arity)),
+            Operation::BinaryOp(bin_op_kind) => vm.handle_bin_op(*bin_op_kind),
+            Operation::Call(maybe_first, maybe_second) => match (maybe_first, maybe_second) {
+                (None, Some(func)) => vm.call(func),
+                (Some(module), Some(func)) => match *module {
+                    b"math" => {
+                        use modules::math as lib;
+                        todo!()
                     }
-                }?;
-                let args = if arity > 0 {
-                    let deferenced: Vec<Object> = args.iter().map(|x| **x).collect();
-                    vm.register_many(&deferenced)
-                } else {
-                    &[]
-                };
-                match vm.program.get_memo((func_ptr, args)) {
-                    Some(value) => {
-                        // println!("YES DUDE {:?}", args);
-                        match unsafe { vm.obj_stack.pop_n(arity) } {
-                            Ok(ts) => Ok(ts),
-                            Err(_) => vm.error(ProgramErrorKind::StackError(arity)),
-                        }?;
-                        let value = vm.register_single(*value);
-                        vm.obj_stack.push(value);
-                        Ok(())
-                    }
-                    None => {
-                        vm.call_stack.push(Frame::new(vm.counter, FrameKind::Call));
-                        let current_frame = match vm.call_stack.last_mut() {
-                            Ok(ts) => Ok(ts),
-                            Err(e) => return vm.error(e),
-                        }?;
-                        let args = if args.len() > 0 {
-                            vm.program.register_arguments(args)
-                        } else {
-                            args
-                        };
-                        current_frame.memo_key = (func_ptr, args);
-                        vm.jump(&func);
-                        Ok(())
+                    _ => todo!(),
+                },
+                (None, None) => {
+                    let mut new_frame = Frame::new(vm.counter, FrameKind::Call);
+                    new_frame.copy_locals(vm.call_stack.last().unwrap());
+                    let obj = match vm.obj_stack.pop() {
+                        Ok(o) => o,
+                        Err(e) => return vm.error(e),
+                    };
+                    if let ObjectData::Func(name) = obj.data {
+                        match vm.program.funcs.get(name) {
+                            Some((idx, arity)) => {
+                                vm.call_stack.push(new_frame);
+                                assert!(vm.obj_stack.len() >= *arity);
+                                vm.goto(*idx + 1);
+                                return Ok(());
+                            }
+                            None => return vm.error(ProgramErrorKind::FunctionExists(name)),
+                        }
+                    } else {
+                        vm.error(ProgramErrorKind::TypeError(ObjectKind::Func, obj.kind))
                     }
                 }
-            }
+                (Some(_), None) => unreachable!(),
+            },
             Operation::PushLit(literal) => {
                 let get_const = vm.get_const(literal);
                 if let Some(lit) = get_const {
@@ -168,9 +159,9 @@ impl Operation {
                                 data: ObjectData::Float(whole, prec),
                             })
                         } else {
-                            return vm.error(ProgramErrorKind::ParsingError(
-                                utils::bytes_to_string(literal),
-                            ));
+                            return vm.error(ProgramErrorKind::ParsingError(utils::display_bytes(
+                                literal,
+                            )));
                         }
                     };
                     vm.obj_stack.push(obj);
@@ -276,7 +267,23 @@ impl Operation {
                 vm.temp = Some(obj);
                 Ok(())
             }
-            Operation::Func(_, _) => Ok(()),
+            Operation::Func(name, arity) => {
+                let func_obj = vm.register_single(Object {
+                    kind: ObjectKind::Func,
+                    data: ObjectData::Func(name),
+                });
+                match vm.call_stack.last_mut() {
+                    Ok(frame) => {
+                        frame.add_local(name, func_obj);
+                        let done_address = vm.program.get_done(&(vm.counter - 1));
+                        match done_address {
+                            Ok(addy) => Ok(vm.goto(*addy)),
+                            Err(e) => vm.error(e)?,
+                        }
+                    }
+                    Err(_) => todo!(),
+                }
+            }
             Operation::Done => {
                 let frame = {
                     match { vm.call_stack.pop() } {
@@ -300,6 +307,9 @@ impl Operation {
                         return Ok(());
                     }
                     FrameKind::Main => vm.exit(Some(0)),
+                    FrameKind::Initial => {
+                        vm.call_stack.push(frame);
+                    }
                 }
                 Ok(())
             }
@@ -354,9 +364,8 @@ impl Operation {
                     }
                 }?;
                 let maybe_obj_ptr = current_frame.get_local(obj_name);
-                let obj_ptr = maybe_obj_ptr.unwrap_or_else(|| {
-                    panic!("No such name '{}'", utils::bytes_to_string(obj_name))
-                });
+                let obj_ptr = maybe_obj_ptr
+                    .unwrap_or_else(|| panic!("No such name '{}'", utils::display_bytes(obj_name)));
                 let pc = vm.counter.clone();
                 let mut new_frame = Frame::new(pc, FrameKind::DoForInLoop);
                 new_frame.copy_locals(current_frame);
@@ -567,7 +576,6 @@ impl Operation {
                         }
                     }
                 };
-                println!("{num}");
                 match { vm.obj_stack.pop_mut() } {
                     Ok(&mut &Object { ref kind, mut data }) => {
                         if let ObjectData::List(ref mut start, ref mut len, ref mut alloc) = data {

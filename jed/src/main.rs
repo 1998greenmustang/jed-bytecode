@@ -1,26 +1,11 @@
-extern crate jed_macros;
-extern crate lexopt;
-mod arena;
-mod binops;
-mod builtin;
-mod error;
-mod frame;
-mod modules;
-mod object;
-mod operation;
-mod program;
-mod span;
-mod stack;
-mod utils;
-mod vm;
 use std::{
     fs::File,
     io::{self, Read, Seek, SeekFrom},
     path::Path,
 };
 
-use program::Program;
-use vm::VM;
+use ::jed::program::Program;
+use ::jed::vm::VM;
 
 const HELP: &str = "jed [COMMAND] [OPTIONS]";
 const MAGIC_NUMBER: &[u8] = "jed".as_bytes();

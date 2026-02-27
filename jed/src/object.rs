@@ -55,10 +55,10 @@ impl Debug for ObjectData {
             ObjectData::Float(i, p) => write!(f, "float ({i}.{p})"),
             ObjectData::UnsignedInt(u) => write!(f, "uint ({u})"),
             ObjectData::String(items) => {
-                write!(f, "string (\"{}\")", utils::bytes_to_string(items))
+                write!(f, "string (\"{}\")", utils::display_bytes(items))
             }
             ObjectData::Bool(b) => write!(f, "bool ({b:?})"),
-            ObjectData::Func(items) => write!(f, "func ({})", utils::bytes_to_string(items)),
+            ObjectData::Func(items) => write!(f, "func ({})", utils::display_bytes(items)),
             ObjectData::Pointer(pr) => write!(f, "ptr ({pr:p})"),
             ObjectData::Nil => write!(f, "Nil"),
             ObjectData::List(start, len, _alloc) => unsafe {
@@ -76,9 +76,9 @@ impl Display for ObjectData {
         match self {
             ObjectData::Integer(i) => write!(f, "{i}"),
             ObjectData::Float(i, p) => write!(f, "{i}.{p}"),
-            ObjectData::String(s) => write!(f, "{}", utils::bytes_to_string(s)),
+            ObjectData::String(s) => write!(f, "{}", utils::display_bytes(s)),
             ObjectData::Bool(b) => write!(f, "{b}"),
-            ObjectData::Func(n) => write!(f, "{}", utils::bytes_to_string(n)),
+            ObjectData::Func(n) => write!(f, "{}", utils::display_bytes(n)),
             ObjectData::Pointer(pr) => write!(f, "{pr:p}"),
             ObjectData::Nil => write!(f, "Nil"),
             ObjectData::UnsignedInt(_) => todo!(),

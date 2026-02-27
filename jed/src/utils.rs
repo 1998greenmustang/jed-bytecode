@@ -1,6 +1,6 @@
 use crate::error::ProgramErrorKind;
 
-pub fn bytes_to_string(bytes: &[u8]) -> String {
+pub fn display_bytes(bytes: &[u8]) -> String {
     match String::from_utf8(bytes.to_vec()) {
         Ok(s) => s,
         Err(_) => unreachable!(),
@@ -10,6 +10,13 @@ pub fn bytes_to_string(bytes: &[u8]) -> String {
 pub fn display_option_usize(a: &Option<usize>) -> String {
     match a {
         Some(n) => n.to_string(),
+        None => "".to_owned(),
+    }
+}
+
+pub fn display_option_bytes(a: &Option<&[u8]>) -> String {
+    match a {
+        Some(n) => display_bytes(n),
         None => "".to_owned(),
     }
 }

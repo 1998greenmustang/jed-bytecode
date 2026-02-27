@@ -10,6 +10,7 @@ pub enum FrameKind {
     DoIfBlock,
     Call,
     Main,
+    Initial,
 }
 
 #[derive(Debug, Clone)]

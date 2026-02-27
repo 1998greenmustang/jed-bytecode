@@ -28,11 +28,10 @@ pub struct VM {
 impl VM {
     pub fn new(program: Program, debug: bool) -> Self {
         let mut call_stack = Stack::new();
-        call_stack.push(Frame::new(program.instructions.len(), FrameKind::Main));
-        let main = program.get_main();
+        call_stack.push(Frame::new(program.instructions.len(), FrameKind::Initial));
         VM {
             call_stack,
-            counter: main,
+            counter: 0,
             program,
             consts: HashMap::new(),
             obj_stack: Stack::new(),
@@ -40,6 +39,54 @@ impl VM {
             memory: Default::default(),
             current_span: Span::empty(),
             debug,
+        }
+    }
+
+    pub fn call(&mut self, name: &'static [u8]) -> Result<(), ProgramError> {
+        match self.program.funcs.get(name).cloned() {
+            Some((idx, arity)) => {
+                let args = {
+                    match unsafe { self.obj_stack.last_n(arity) } {
+                        Ok(ts) => ts,
+                        Err(_) => return self.error(ProgramErrorKind::StackError(arity)),
+                    }
+                };
+                let args = if arity > 0 {
+                    let deferenced: Vec<Object> = args.iter().map(|x| **x).collect();
+                    self.register_many(&deferenced)
+                } else {
+                    &[]
+                };
+                match self.program.get_memo((idx, args)) {
+                    Some(value) => {
+                        // println!("YES DUDE {:?}", args);
+                        match unsafe { self.obj_stack.pop_n(arity) } {
+                            Ok(ts) => Ok(ts),
+                            Err(_) => self.error(ProgramErrorKind::StackError(arity)),
+                        }?;
+                        let value = self.register_single(*value);
+                        self.obj_stack.push(value);
+                        Ok(())
+                    }
+                    None => {
+                        self.call_stack
+                            .push(Frame::new(self.counter, FrameKind::Call));
+                        let current_frame = match self.call_stack.last_mut() {
+                            Ok(ts) => Ok(ts),
+                            Err(e) => return self.error(e),
+                        }?;
+                        let args = if args.len() > 0 {
+                            self.program.register_arguments(args)
+                        } else {
+                            args
+                        };
+                        current_frame.memo_key = (idx, args);
+                        self.goto(idx + 1);
+                        Ok(())
+                    }
+                }
+            }
+            None => todo!(),
         }
     }
 
@@ -136,16 +183,19 @@ impl VM {
     }
 
     pub fn run(&mut self) {
-        self.counter = self.program.get_main();
+        let mut ran_main = false;
         loop {
+            // println!(
+            //     "{}/{} {:?}",
+            //     self.counter,
+            //     self.program.instructions.len() - 1,
+            //     self.program.instructions.get(self.counter)
+            // );
             self.update_span();
-            if self.counter == self.program.instructions.len() - 1 {
-                return;
-            }
             if self.call_stack.len() > 100_000 {
                 panic!("call stack overflow");
             }
-            if self.obj_stack.len() > 1_000_000 {
+            if self.obj_stack.len() > 1_000_000_000 {
                 unsafe {
                     panic!(
                         "object stack overflow, {:?}",
@@ -165,6 +215,23 @@ impl VM {
                 Err(e) => {
                     println!("\nruntime failure:\n{}", e);
                     std::process::exit(1);
+                }
+            }
+
+            if self.counter == self.program.instructions.len() {
+                if !ran_main {
+                    let main = self.program.register_bytes(b"main");
+                    match self.program.funcs.get(main) {
+                        Some((idx, _)) => {
+                            let mut frame = Frame::new(self.counter, FrameKind::Main);
+                            frame.copy_locals(self.call_stack.last().unwrap());
+                            self.counter = *idx + 1;
+                            ran_main = true;
+                        }
+                        None => return,
+                    }
+                } else {
+                    return;
                 }
             }
 
@@ -219,7 +286,7 @@ impl VM {
     }
 
     pub fn exit(&mut self, code: Option<i32>) {
-        self.counter = self.program.get_main();
+        self.counter = 0;
         self.obj_stack = Stack::new();
         self.call_stack = Stack::new();
         self.program.memos.clear();
@@ -300,6 +367,11 @@ impl VM {
             BinOpKind::Or => binops::or(lhs, rhs),
             BinOpKind::Power => binops::pow(lhs, rhs),
             BinOpKind::Root => binops::root(lhs, rhs),
+            BinOpKind::BitAnd => todo!(),
+            BinOpKind::BitOr => todo!(),
+            BinOpKind::Xor => todo!(),
+            BinOpKind::BitShLeft => todo!(),
+            BinOpKind::BitShRight => todo!(),
         };
 
         match result {
@@ -331,7 +403,7 @@ impl VM {
                         frame
                             .locals
                             .into_keys()
-                            .map(|x| utils::bytes_to_string(x))
+                            .map(|x| utils::display_bytes(x))
                             .collect::<Vec<String>>()
                     ),
                     Err(_) => todo!(),

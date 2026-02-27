@@ -8,12 +8,20 @@ use crate::{
 #[repr(u8)]
 #[derive(Debug, Clone, Copy)]
 pub enum BinOpKind {
+    // Additive
     Add,
     Sub,
+
+    // Multiplicative
     Mul,
     Div,
     Mod,
 
+    // Exponetial
+    Power,
+    Root,
+
+    // Comparitive
     Eq,
     LessEq,
     GreatEq,
@@ -22,8 +30,12 @@ pub enum BinOpKind {
     And,
     Or,
 
-    Power,
-    Root,
+    // Bitwise
+    BitAnd,
+    BitOr,
+    Xor,
+    BitShLeft,
+    BitShRight,
 }
 
 impl Display for BinOpKind {
@@ -43,6 +55,11 @@ impl Display for BinOpKind {
             BinOpKind::Or => write!(f, "||"),
             BinOpKind::Power => write!(f, "pow"),
             BinOpKind::Root => write!(f, "root"),
+            BinOpKind::BitAnd => write!(f, "&"),
+            BinOpKind::BitOr => write!(f, "|"),
+            BinOpKind::Xor => write!(f, "^"),
+            BinOpKind::BitShLeft => write!(f, "<<"),
+            BinOpKind::BitShRight => write!(f, ">>"),
         }
     }
 }
@@ -64,6 +81,11 @@ impl From<&str> for BinOpKind {
             "||" => BinOpKind::Or,
             "pow" => BinOpKind::Power,
             "root" => BinOpKind::Root,
+            "&" => BinOpKind::BitAnd,
+            "|" => BinOpKind::BitOr,
+            "^" => BinOpKind::Xor,
+            "<<" => BinOpKind::BitShLeft,
+            ">>" => BinOpKind::BitShRight,
             _ => panic!("Binary operator not implemented: '{}'", value),
         }
     }
