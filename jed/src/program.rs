@@ -91,7 +91,7 @@ impl Program {
         file.write(MAGIC_NUMBER)?;
         for op in self.instructions.clone() {
             match op {
-                Operation::BinaryOp(bin_op_kind) => {
+                Operation::BinOp(bin_op_kind) => {
                     let _ = file.write(&[op.into(), bin_op_kind as u8])?;
                 }
                 Operation::CallBuiltIn(built_in) => {
@@ -175,7 +175,7 @@ impl Program {
                     reader.read(&mut binopbuffer[..])?;
                     program
                         .instructions
-                        .push(Operation::BinaryOp(binopbuffer[0].into()))
+                        .push(Operation::BinOp(binopbuffer[0].into()))
                 }
                 // "call_builtin"
                 // BuiltIn
@@ -394,7 +394,7 @@ impl Program {
                         Debug
                     ]},
                     // single custom type arg
-                    {[BinaryOp, CallBuiltIn, UnaryOp], arg.as_str().into()},
+                    {[BinOp, CallBuiltIn, UnaryOp], arg.as_str().into()},
                     // bytes
                     {[PushLit, PushName, ReturnIf, StoreConst, StoreName, DoForIn, ReturnIfConst, Import],
                         program.register(arg)},

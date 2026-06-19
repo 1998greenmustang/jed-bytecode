@@ -31,7 +31,7 @@ pub enum Operation {
     #[jed(type: Option<usize>, func: display_option_usize)]
     #[jed(type: &'static [u8], func: display_bytes)]
     #[jed(type: Option<&'static [u8]>, func: display_option_bytes)]
-    BinaryOp(BinOpKind),
+    BinOp(BinOpKind),
     UnaryOp(UnOpKind),
     Call(Option<&'static [u8]>, Option<&'static [u8]>),
     CallBuiltIn(BuiltIn),
@@ -73,7 +73,7 @@ pub enum Operation {
 impl Operation {
     pub fn call(&self, vm: &mut VM) -> Result<(), ProgramError> {
         match self {
-            Operation::BinaryOp(bin_op_kind) => vm.handle_bin_op(*bin_op_kind),
+            Operation::BinOp(bin_op_kind) => vm.handle_bin_op(*bin_op_kind),
             Operation::Call(maybe_first, maybe_second) => match (maybe_first, maybe_second) {
                 (None, Some(func)) => vm.call(func),
                 (Some(module), Some(func)) => match *module {

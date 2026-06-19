@@ -120,11 +120,12 @@ impl VM {
         } else if n > alloc {
             // grow it baby
             let amt_to_alloc = n - alloc;
-            let pretend_ptr = unsafe { starting_ptr.add(1).addr() as *const Object };
+            let pretend_ptr = unsafe { starting_ptr.add(alloc).addr() as *const Object };
             if pretend_ptr == self.memory.start().addr() as *const Object {
                 self.memory.extend_from(starting_ptr, amt_to_alloc);
                 return Ok(starting_ptr);
             } else {
+                panic!();
                 unsafe {
                     // create new list
                     let mut objects: Vec<Object> = vec![];
