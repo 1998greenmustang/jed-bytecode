@@ -1,3 +1,4 @@
+
 func main 0
 	push_lit 1000000
 	store_name n
@@ -5,12 +6,11 @@ func main 0
 # create prime list 
 	push_lit false
 	push_lit false
+	push_lit true
 	push_name n
 	push_lit 1
 	bin_op -
-	do_for
-		push_lit true
-	done
+	push_many_lits
 	create_list
 	store_name prime
 
