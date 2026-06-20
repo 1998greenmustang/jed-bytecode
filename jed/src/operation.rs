@@ -901,16 +901,16 @@ impl Operation {
                 Ok(())
             }
             Operation::Debug => {
-                let objs = match unsafe { vm.obj_stack.at_most_n(10) } {
-                    Ok(os) => Ok(os),
-                    Err(e) => vm.error(e),
-                }?;
-                let frames = match unsafe { vm.call_stack.at_most_n(10) } {
-                    Ok(fs) => Ok(fs),
-                    Err(e) => vm.error(e),
-                }?;
-                println!("object stack: {:?}", objs);
-                println!("call stack: {:?}", frames);
+                // let objs = match unsafe { vm.obj_stack.at_most_n(10) } {
+                //     Ok(os) => Ok(os),
+                //     Err(e) => vm.error(e),
+                // }?;
+                // let frames = match unsafe { vm.call_stack.at_most_n(10) } {
+                //     Ok(fs) => Ok(fs),
+                //     Err(e) => vm.error(e),
+                // }?;
+                // println!("object stack: {:?}", objs);
+                // println!("call stack: {:?}", frames);
                 Ok(())
             }
             // Operation::Import(bytes) => {

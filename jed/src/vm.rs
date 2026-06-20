@@ -57,14 +57,14 @@ impl VM {
                 } else {
                     &[]
                 };
-                match self.program.get_memo((idx, args)) {
+                match self.program.get_memo((idx, args)).cloned() {
                     Some(value) => {
                         // println!("YES DUDE {:?}", args);
                         match unsafe { self.obj_stack.pop_n(arity) } {
                             Ok(ts) => Ok(ts),
                             Err(_) => self.error(ProgramErrorKind::StackError(arity)),
                         }?;
-                        let value = self.register_single(*value);
+                        let value = self.register_single(value);
                         self.obj_stack.push(value);
                         Ok(())
                     }
@@ -185,14 +185,14 @@ impl VM {
 
     pub fn run(&mut self) {
         let mut ran_main = false;
-        loop {
+        while let Some(op) = self.next() {
             // println!(
             //     "{}/{} {:?}",
             //     self.counter,
             //     self.program.instructions.len() - 1,
             //     self.program.instructions.get(self.counter)
             // );
-            self.update_span();
+            // self.update_span();
             if self.call_stack.len() > 100_000 {
                 panic!("call stack overflow");
             }
@@ -208,8 +208,7 @@ impl VM {
                     )
                 }
             }
-            let op = self.next();
-            let res = op.unwrap().call(self);
+            let res = op.call(self);
 
             match res {
                 Ok(_) => {}
@@ -243,8 +242,8 @@ impl VM {
     }
 
     pub fn run_block(&mut self, frame_type: FrameKind) {
-        loop {
-            self.update_span();
+        while let Some(op) = self.next() {
+            // self.update_span();
             if self.counter == self.program.instructions.len() - 1 {
                 return;
             }
@@ -263,8 +262,7 @@ impl VM {
                     )
                 }
             }
-            let op = self.next();
-            let res = op.unwrap().call(self);
+            let res = op.call(self);
 
             match res {
                 Ok(_) => {}
@@ -395,7 +393,8 @@ impl VM {
         }
     }
 
-    pub fn error<T>(&self, e: ProgramErrorKind) -> Result<T, ProgramError> {
+    pub fn error<T>(&mut self, e: ProgramErrorKind) -> Result<T, ProgramError> {
+        self.update_span();
         match e {
             ProgramErrorKind::VariableExists(_) => {
                 match self.call_stack.last().cloned() {
