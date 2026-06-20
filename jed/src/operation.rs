@@ -806,7 +806,11 @@ impl Operation {
                 }?;
 
                 if let ObjectData::Iterator(_list_ptr, next) = data {
-                    let val = if **next == 0 { 0 } else { (**next) - 1 };
+                    let val = if **next == 0 {
+                        vm.error(ProgramErrorKind::TodoError)?
+                    } else {
+                        (**next) - 1
+                    };
                     let obj = Object {
                         kind: ObjectKind::Integer,
                         data: ObjectData::Integer(val as isize),
