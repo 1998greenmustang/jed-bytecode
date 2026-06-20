@@ -125,7 +125,6 @@ impl VM {
                 self.memory.extend_from(starting_ptr, amt_to_alloc);
                 return Ok(starting_ptr);
             } else {
-                panic!();
                 unsafe {
                     // create new list
                     let mut objects: Vec<Object> = vec![];
