@@ -2,28 +2,34 @@ use std::{
     collections::{BTreeMap, HashMap},
     fs::File,
     io::{self, BufReader, Read, Write},
+    rc::Rc,
+    str::CharIndices,
 };
 
 use jed_macros::match_ops;
 
 use crate::{
-    MAGIC_NUMBER, arena::Dropless, error::ProgramErrorKind, object::Object, operation::Operation,
+    MAGIC_NUMBER,
+    error::ProgramErrorKind,
+    memory::{Dropless, list::List, peekableiterator::PeekableIterator},
+    object::Object,
+    operation::{Block, Operation},
     utils,
 };
 
 type Arity = usize;
 type Index = usize;
 
-pub type MemoKey = (Index, &'static [Object]);
+pub type MemoKey = (&'static [u8], &'static [Object]);
 type MemoTable = HashMap<MemoKey, Object>;
 
 pub struct Program {
     pub string_arena: Dropless,
     pub saved_strings: BTreeMap<String, &'static [u8]>,
-    pub instructions: Vec<Operation>,
-    pub funcs: BTreeMap<&'static [u8], (Index, Arity)>,
-    pub block_returns: BTreeMap<Index, Index>,
+    pub instructions: Block,
+    pub funcs: BTreeMap<&'static [u8], Operation>,
     pub memos: MemoTable,
+    pub blocks: Vec<Block>,
 }
 
 impl Program {
@@ -31,10 +37,10 @@ impl Program {
         let mut program = Program {
             string_arena: Default::default(),
             saved_strings: BTreeMap::new(),
-            instructions: vec![],
+            instructions: Default::default(),
             funcs: BTreeMap::new(),
+            blocks: Vec::new(),
             memos: HashMap::new(),
-            block_returns: BTreeMap::new(),
         };
         // register keywords/stuff that not be added later
         // probably should be a macro but (:
@@ -45,7 +51,7 @@ impl Program {
 
     pub fn get_op(&self, idx: usize) -> &Operation {
         match self.instructions.get(idx) {
-            Some(op) => op,
+            Some(op) => &op,
             None => &Operation::Exit,
         }
     }
@@ -88,55 +94,7 @@ impl Program {
     }
 
     pub fn to_file(&self, file: &mut File) -> io::Result<()> {
-        file.write(MAGIC_NUMBER)?;
-        for op in self.instructions.clone() {
-            match op {
-                Operation::BinOp(bin_op_kind) => {
-                    let _ = file.write(&[op.into(), bin_op_kind as u8])?;
-                }
-                Operation::CallBuiltIn(built_in) => {
-                    let _ = file.write(&[op.into(), built_in as u8])?;
-                }
-                Operation::Call(mod_name, func_name) => todo!(),
-                Operation::PushLit(items)
-                | Operation::PushName(items)
-                | Operation::ReturnIf(items)
-                | Operation::ReturnIfConst(items)
-                | Operation::StoreConst(items)
-                | Operation::StoreName(items)
-                | Operation::DoForIn(items) => {
-                    // op, usize (len), slice
-                    let mut data = Vec::<u8>::from(&[op.into()]);
-                    data.extend_from_slice(items.len().to_be_bytes().as_slice());
-                    data.extend_from_slice(items);
-                    let _ = file.write(&data)?;
-                }
-                Operation::Func(items, arity) => {
-                    // op, usize (len), slice, usize (arity)
-                    let mut data = Vec::<u8>::from(&[op.into()]);
-                    data.extend_from_slice(items.len().to_be_bytes().as_slice());
-                    data.extend_from_slice(items);
-                    data.extend_from_slice(arity.to_be_bytes().as_slice());
-                    let _ = file.write(&data)?;
-                }
-                Operation::CreateList(option)
-                | Operation::ListGet(option)
-                | Operation::ListSet(option) => {
-                    // op, ok || none, maybe usize
-                    let mut data = Vec::<u8>::from(&[op.into(), u8::from(option.is_some())]);
-                    match option {
-                        Some(num) => data.extend_from_slice(&num.to_be_bytes()),
-                        None => {}
-                    }
-                    let _ = file.write(&data)?;
-                }
-                _ => {
-                    // everything else doesnt have args
-                    let _ = file.write(&[op.into()])?;
-                }
-            }
-        }
-        Ok(())
+        todo!()
     }
 
     /// TODO
@@ -153,332 +111,165 @@ impl Program {
     /// ]
     /// Spans will be added later for error reporting
     pub fn from_file(file: &mut File) -> io::Result<Self> {
-        let mut reader = BufReader::new(file);
-        let mut program = Self::new();
-        let mut magic_number: [u8; 3] = [0; 3];
-        reader.read(&mut magic_number[..])?;
-        assert_eq!(magic_number, MAGIC_NUMBER, "not a jed file");
-        let mut op_buffer: [u8; 1] = [0; 1];
-        loop {
-            let n = reader.read(&mut op_buffer[..])?;
-            // println!("buf: {:?} ({})", op_buffer, n);
-            if n != 1 {
+        todo!()
+    }
+
+    fn parse_token(text: &mut PeekableIterator<char>) -> Option<String> {
+        let _ = text.until(|c| !&[' ', '\t', '\n'].contains(c));
+        let c = text.peek();
+        match c {
+            Some(c) if c == &'"' => {
+                text.next();
+                if let Some(u) = text.until_any_inclusive(&['"']) {
+                    let mut u: Vec<char> = u.iter().map(|e| *e).collect();
+                    u.insert(0, '"');
+                    return Some(u.iter().collect());
+                } else {
+                    // TODO parsing error
+                    panic!()
+                }
+            }
+            Some(c) if ['{', '}'].contains(&c) => {
+                let c = text.next()?;
+                return Some(c.to_string());
+            }
+            Some(_) => {
+                if let Some(u) = text.until_any(&[' ', '\t', '{', '}', '\n']) {
+                    return Some(u.iter().collect());
+                } else {
+                    return None;
+                }
+            }
+            None => return None,
+        }
+    }
+
+    fn parse_block(&mut self, text: &mut PeekableIterator<char>) -> Block {
+        let mut block = List::new();
+
+        while let Some(token) = Self::parse_token(text) {
+            if token == "}" {
                 break;
             }
-            let op = Operation::from_index(&op_buffer[0]);
-            match op {
-                // "bin_op"
-                // BinOpKind
-                // in file: u8
-                "bin_op" => {
-                    let mut binopbuffer: [u8; 1] = [0; 1];
-                    reader.read(&mut binopbuffer[..])?;
-                    program
-                        .instructions
-                        .push(Operation::BinOp(binopbuffer[0].into()))
-                }
-                // "call_builtin"
-                // BuiltIn
-                // in file: u8
-                "call_builtin" => {
-                    let mut builtinbuffer: [u8; 1] = [0; 1];
-                    reader.read(&mut builtinbuffer[..])?;
-                    program
-                        .instructions
-                        .push(Operation::CallBuiltIn(builtinbuffer[0].into()))
-                }
-                // &'static [u8]
-                // in file: usize (length), [u8; length]
-                "call" | "push_lit" | "push_name" | "return_if" | "store_const" | "store_name"
-                | "do_for_in" | "return_if_const" => {
-                    let mut slice_length: [u8; size_of::<usize>()] = [0; size_of::<usize>()];
-                    let n = reader.read(&mut slice_length[..])?;
-                    assert_eq!(n, size_of::<usize>(), "did not receive enough data");
-                    let slice_length: usize = usize::from_be_bytes(slice_length);
-                    println!("slice_length {}", slice_length);
-
-                    let mut args: Vec<u8> = vec![0; slice_length];
-                    let n = reader.read(&mut args)?;
-                    assert_eq!(n, slice_length, "did not receive enough data");
-                    let args = program.register_bytes(&args);
-
-                    program.instructions.push((op_buffer[0], args).into());
-                }
-
-                // create_list, list_get, list_set
-                // Option<usize>
-                // in file: Bool, usize
-                "create_list" | "list_get" | "list_set" | "list_alloc" => {
-                    let mut boolean: [u8; 1] = [0; 1];
-                    let n = reader.read(&mut boolean[..])?;
-                    assert_eq!(n, 1, "did not receive enough data");
-                    let boolean: bool = unsafe { std::mem::transmute(boolean) };
-                    if boolean {
-                        let mut number: [u8; size_of::<usize>()] = [0; size_of::<usize>()];
-                        let n = reader.read(&mut number[..])?;
-                        assert_eq!(n, size_of::<usize>(), "did not receive enough data");
-                        let number: usize = usize::from_be_bytes(number);
-                        program
-                            .instructions
-                            .push((op_buffer[0], Some(number)).into())
-                    } else {
-                        program.instructions.push((op_buffer[0], None).into())
-                    }
-                }
-                // func
-                // &'static [u8], usize
-                // in file: usize (length), [u8; length]
-                "func" => {
-                    let mut slice_length: [u8; size_of::<usize>()] = [0; size_of::<usize>()];
-                    let n = reader.read(&mut slice_length[..])?;
-                    assert_eq!(n, size_of::<usize>(), "did not receive enough data");
-                    let slice_length: usize = usize::from_be_bytes(slice_length);
-
-                    let mut name: Vec<u8> = vec![0; slice_length];
-                    let n = reader.read(&mut name)?;
-                    assert_eq!(n, slice_length, "did not receive enough data");
-                    let name = program.register_bytes(&name);
-
-                    let mut arity: [u8; size_of::<usize>()] = [0; size_of::<usize>()];
-                    let n = reader.read(&mut arity[..])?;
-                    assert_eq!(n, size_of::<usize>(), "did not receive enough data");
-                    let arity: usize = usize::from_be_bytes(arity);
-
-                    program.instructions.push(Operation::Func(name, arity));
-
-                    // register the function
-                    program
-                        .funcs
-                        .insert(name, (program.instructions.len(), arity));
-                }
-
-                "push_temp" | "pop" | "store_temp" | "done" | "exit" | "do_for" | "list_push"
-                | "push_range" | "get_ptr" | "read_ptr" | "set_ptr" | "get_iter" | "iter_next"
-                | "iter_prev" | "iter_skip" | "iter_current" | "iterate" | "do_if" | "debug " => {
-                    program.instructions.push(op_buffer[0].into())
-                }
-                _ => break,
-            }
-        }
-        // Get the Done address for each block
-        let blocks: Vec<(usize, &Operation)> = program
-            .instructions
-            .iter()
-            .enumerate()
-            .filter(|(_, o)| match o {
-                Operation::Done | Operation::Exit => return true,
-                Operation::Func(_, _)
-                | Operation::DoFor
-                | Operation::DoForIn(_)
-                | Operation::Iterate
-                | Operation::DoIf => return true,
-                _ => return false,
-            })
-            .collect();
-
-        assert_eq!(
-            blocks.len() % 2,
-            0,
-            "bro some block aint closed {:?}",
-            blocks
-        );
-        let mut claimed_dones: Vec<usize> = vec![];
-        for (block_pc, block_op) in blocks.iter() {
-            match block_op {
-                Operation::Func(_, _)
-                | Operation::DoFor
-                | Operation::DoForIn(_)
-                | Operation::Iterate
-                | Operation::DoIf => {
-                    for (done_pc, done_op) in blocks.iter().rev() {
-                        match done_op {
-                            Operation::Done | Operation::Exit => {
-                                if !claimed_dones.contains(done_pc) {
-                                    claimed_dones.push(*done_pc);
-                                    program.block_returns.insert(*block_pc, *done_pc);
-                                    break;
-                                }
-                            }
-                            _ => (),
+            let op = token.as_str();
+            block.push(match_ops!(
+                // no argument
+                {[
+                    Empty,
+                    Pop,
+                    Dupe,
+                    Swap,
+                    Exit,
+                    PushTemp,
+                    StoreTemp,
+                    ListPush,
+                    PushRange,
+                    GetPtr,
+                    ReadPtr,
+                    SetPtr,
+                    GetIter,
+                    IterNext,
+                    IterPrev,
+                    IterSkip,
+                    IterCurrent,
+                    Debug
+                ]},
+                // single custom type arg
+                {[BinOp, CallBuiltIn, UnaryOp], Self::parse_token(text).unwrap().into()},
+                // bytes
+                {[PushLit, PushName, ReturnIf, StoreConst, StoreName, ReturnIfConst, Import],
+                    self.register(Self::parse_token(text).unwrap().into())},
+                // option<usize>
+                {[CreateList, ListAlloc, ListSet, ListGet],
+                    utils::string_to_t(match Self::parse_token(text) {
+                        Some(v) if v.chars().all(|c| c.is_numeric()) => v,
+                        _ => {
+                            text.undo();
+                            "".to_string()
                         }
+                    }).ok()},
+                {Call, {
+                    let arg = Self::parse_token(text).unwrap();
+                    let split: Vec<&str> = arg.split(' ').filter(|x| x != &"").collect();
+                    match split.len() {
+                        2 => unsafe {
+                            let modname = self.register(split.get_unchecked(0).to_string());
+                            let funcname = self.register(split.get_unchecked(1).to_string());
+                            Operation::Call(Some(modname), Some(funcname))
+                        }
+                        1 => unsafe {
+                            let funcname = self.register(split.get_unchecked(0).to_string());
+                            Operation::Call(None, Some(funcname))
+                        }
+                        0 => Operation::Call(None, None),
+                        _ => panic!()
+                    }
+                }}
+                {Func, {
+                    let saved_name = self.register(Self::parse_token(text).unwrap());
+                    let arity = Self::parse_token(text).unwrap()
+                        .parse::<usize>()
+                        .expect("arity is not a number or something");
+                    let idx = self.instructions.len();
+                    match Self::parse_token(text) {
+                        Some(bracket) if bracket == "{" => {
+                            let b = self.parse_block(text);
+                            let op = Operation::Func(saved_name, arity, b);
+                            self.funcs.insert(saved_name, op.clone());
+                            op
+                        }
+                        _ => panic!("start blocks with {{ plz")
+                    }
+                }},
+                {DoForIn, {
+                    let arg = self.register(Self::parse_token(text).unwrap());
+                    match Self::parse_token(text) {
+                        Some(bracket) if bracket == "{" => {
+                            let b = self.parse_block(text);
+                            Operation::DoForIn(arg, b)
+                        }
+                        _ => panic!("start blocks with {{ plz")
+                    }
+                }},
+                {[RangeLoop, Iterate, DoIf, DoFor,]
+                    match Self::parse_token(text) {
+                        Some(bracket) if bracket == "{" => {
+                            self.parse_block(text)
+                        }
+                        _ => panic!("start blocks with {{ plz")
                     }
                 }
-                _ => {}
-            }
+            ));
+            // buffer.push(c);
         }
-
-        return Ok(program);
+        // println!("{}", block);
+        let b = Rc::new(block);
+        self.blocks.push(Rc::clone(&b));
+        return Rc::clone(&b);
     }
 
-    pub fn from_ops(ops: Vec<Operation>) -> Self {
-        let mut program = Self::new();
-        program.instructions = ops;
-        let blocks: Vec<(usize, &Operation)> = program
-            .instructions
-            .iter()
-            .enumerate()
-            .filter(|(_, o)| match o {
-                Operation::Done | Operation::Exit => return true,
-                Operation::Func(_, _)
-                | Operation::DoFor
-                | Operation::DoForIn(_)
-                | Operation::Iterate
-                | Operation::DoIf => return true,
-                _ => return false,
-            })
-            .collect();
-
-        assert_eq!(
-            blocks.len() % 2,
-            0,
-            "bro some block aint closed {:?}",
-            blocks
-        );
-        let mut block_queue: Vec<usize> = vec![];
-        for (pc, op) in blocks.iter() {
-            match op {
-                Operation::Func(name, arity) => {
-                    program.funcs.insert(name, (*pc, *arity));
-                    block_queue.push(*pc);
-                }
-                Operation::DoFor | Operation::DoForIn(_) | Operation::Iterate | Operation::DoIf => {
-                    block_queue.push(*pc);
-                }
-                Operation::Done | Operation::Exit => {
-                    let block_pc = block_queue.pop().unwrap();
-                    program.block_returns.insert(block_pc, *pc);
-                }
-                _ => {}
-            };
+    fn remove_comments(text: String) -> String {
+        let mut new_text = text.clone();
+        while let Some(o) = new_text.find('#') {
+            new_text.replace_range(o..o + new_text[o..].find('\n').unwrap(), "");
         }
-        return program;
+        return new_text;
     }
+
     pub fn from_string(text: String) -> Self {
+        let text = Self::remove_comments(text);
+        let iter = text.chars().into_iter();
         let mut program = Self::new();
-        for line in text.split('\n') {
-            if line.trim().is_empty() {
-                continue;
-            }
-            let line_spl: Vec<&str> = line.split(' ').map(|x| x.trim()).collect();
-            let op = line_spl[0];
-            if op.starts_with('#') {
-                continue;
-            }
-            assert!(Operation::exists(op), "'{}' not a valid operation", op);
-
-            let arg = line_spl[1..].join(" ");
-
-            let operation = {
-                match_ops!(
-                    // no argument
-                    {[
-                        Empty,
-                        Pop,
-                        Done,
-                        Exit,
-                        DoFor,
-                        PushTemp,
-                        StoreTemp,
-                        ListPush,
-                        PushRange,
-                        GetPtr,
-                        ReadPtr,
-                        SetPtr,
-                        GetIter,
-                        IterNext,
-                        IterPrev,
-                        IterSkip,
-                        IterCurrent,
-                        Iterate,
-                        DoIf,
-                        Debug
-                    ]},
-                    // single custom type arg
-                    {[BinOp, CallBuiltIn, UnaryOp], arg.as_str().into()},
-                    // bytes
-                    {[PushLit, PushName, ReturnIf, StoreConst, StoreName, DoForIn, ReturnIfConst, Import],
-                        program.register(arg)},
-                    // option<usize>
-                    {[CreateList, ListAlloc, ListSet, ListGet],
-                        utils::string_to_t(arg).ok()},
-                    {Func, {
-                        let saved_name = program.register(line_spl[1].to_owned());
-                        let arity = line_spl[2]
-                            .parse::<usize>()
-                            .expect("arity is not a number or something");
-                        let idx = program.instructions.len();
-                        program.funcs.insert(saved_name, (idx, arity));
-                        Operation::Func(saved_name, arity)
-                    }},
-                    {Call, {
-                        let split: Vec<&str> = arg.split(' ').filter(|x| x != &"").collect();
-                        match split.len() {
-                            2 => unsafe {
-                                let modname = program.register(split.get_unchecked(0).to_string());
-                                let funcname = program.register(split.get_unchecked(1).to_string());
-                                Operation::Call(Some(modname), Some(funcname))
-                            }
-                            1 => unsafe {
-                                let funcname = program.register(split.get_unchecked(0).to_string());
-                                Operation::Call(None, Some(funcname))
-                            }
-                            0 => Operation::Call(None, None),
-                            _ => panic!()
-                        }
-                    }}
-                )
-            };
-
-            program.instructions.push(operation);
-        }
-
-        let blocks: Vec<(usize, &Operation)> = program
-            .instructions
-            .iter()
-            .enumerate()
-            .filter(|(_, o)| match o {
-                Operation::Done | Operation::Exit => return true,
-                Operation::Func(_, _)
-                | Operation::DoFor
-                | Operation::DoForIn(_)
-                | Operation::Iterate
-                | Operation::DoIf => return true,
-                _ => return false,
-            })
-            .collect();
-
-        assert_eq!(
-            blocks.len() % 2,
-            0,
-            "bro some block aint closed {:?}",
-            blocks
-        );
-        let mut block_queue: Vec<usize> = vec![];
-        for (pc, op) in blocks.iter() {
-            match op {
-                Operation::Func(_, _)
-                | Operation::DoFor
-                | Operation::DoForIn(_)
-                | Operation::Iterate
-                | Operation::DoIf => {
-                    block_queue.push(*pc);
-                }
-                Operation::Done | Operation::Exit => {
-                    let block_pc = block_queue.pop().unwrap();
-                    program.block_returns.insert(block_pc, *pc);
-                }
-                _ => {}
-            }
-        }
-        return program;
+        program.instructions = program.parse_block(&mut iter.collect());
+        program
     }
 
-    pub fn get_done(&self, pc: &usize) -> Result<&usize, ProgramErrorKind> {
-        match self.block_returns.get(pc) {
-            Some(address) => Ok(address),
-            None => Err(ProgramErrorKind::DoneAddress),
-        }
-    }
+    // pub fn get_done(&self, pc: &usize) -> Result<&usize, ProgramErrorKind> {
+    //     match self.block_returns.get(pc) {
+    //         Some(address) => Ok(address),
+    //         None => Err(ProgramErrorKind::DoneAddress),
+    //     }
+    // }
 
     // pub fn import_module(&mut self, other: &mut Program) {
     //     // update: vm.program.instructions, vm.program.funcs, vm.program.string_arena, vm.program.saved_strings

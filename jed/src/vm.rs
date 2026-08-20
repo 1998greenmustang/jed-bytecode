@@ -1,15 +1,14 @@
 use std::{collections::HashMap, fs::File, io};
 
 use crate::{
-    arena,
     binops::{self, BinOpKind},
     error::{ProgramError, ProgramErrorKind},
     frame::{Frame, FrameKind},
-    object::{MutableObject, Object, RegObject},
-    operation::Operation,
+    memory::{self, list::List, stack::Stack},
+    object::{MutableObject, Object, ObjectData, ObjectKind, RegObject},
+    operation::{Block, Operation, Response},
     program::Program,
     span::Span,
-    stack::Stack,
     utils,
 };
 
@@ -20,14 +19,14 @@ pub struct VM {
     pub call_stack: Stack<Frame>,
     pub obj_stack: Stack<RegObject>,
     pub temp: Option<RegObject>,
-    pub memory: arena::Manual<Object>,
+    pub memory: memory::Manual<Object>,
     pub current_span: Span,
     pub debug: bool,
 }
 
 impl VM {
     pub fn new(program: Program, debug: bool) -> Self {
-        let mut call_stack = Stack::new();
+        let mut call_stack: Stack<Frame> = Stack::new();
         call_stack.push(Frame::new(program.instructions.len(), FrameKind::Initial));
         VM {
             call_stack,
@@ -42,13 +41,14 @@ impl VM {
         }
     }
 
-    pub fn call(&mut self, name: &'static [u8]) -> Result<(), ProgramError> {
+    pub fn call(&mut self, name: &'static [u8]) -> Response {
         match self.program.funcs.get(name).cloned() {
-            Some((idx, arity)) => {
+            Some(Operation::Func(name, arity, block)) => {
+                // println!("{block}");
                 let args = {
                     match unsafe { self.obj_stack.last_n(arity) } {
                         Ok(ts) => ts,
-                        Err(_) => return self.error(ProgramErrorKind::StackError(arity)),
+                        Err(_) => return Response::Error(ProgramErrorKind::StackError(arity)),
                     }
                 };
                 let args = if arity > 0 {
@@ -57,41 +57,102 @@ impl VM {
                 } else {
                     &[]
                 };
-                match self.program.get_memo((idx, args)).cloned() {
+                match self.program.get_memo((name, args)).cloned() {
                     Some(value) => {
                         // println!("YES DUDE {:?}", args);
-                        match unsafe { self.obj_stack.pop_n(arity) } {
-                            Ok(ts) => Ok(ts),
-                            Err(_) => self.error(ProgramErrorKind::StackError(arity)),
-                        }?;
+                        match self.obj_stack.pop_n(arity) {
+                            Ok(ts) => ts,
+                            Err(_) => return Response::Error(ProgramErrorKind::StackError(arity)),
+                        };
                         let value = self.register_single(value);
                         self.obj_stack.push(value);
-                        Ok(())
+                        Response::Ok
                     }
                     None => {
                         self.call_stack
                             .push(Frame::new(self.counter, FrameKind::Call));
                         let current_frame = match self.call_stack.last_mut() {
-                            Ok(ts) => Ok(ts),
-                            Err(e) => return self.error(e),
-                        }?;
+                            Ok(ts) => ts,
+                            Err(e) => return Response::Error(e),
+                        };
                         let args = if args.len() > 0 {
                             self.program.register_arguments(args)
                         } else {
                             args
                         };
-                        current_frame.memo_key = (idx, args);
-                        self.goto(idx + 1);
-                        Ok(())
+                        current_frame.memo_key = (name, args);
+                        self.run_block(&block.clone());
+                        let frame = self.call_stack.pop().unwrap();
+                        self.goto(frame.return_address);
+                        Response::Ok
                     }
                 }
             }
-            None => todo!(),
+            _ => todo!(),
+        }
+    }
+
+    pub fn parse_lit(&mut self, bytes: &'static [u8]) -> Result<RegObject, ProgramErrorKind> {
+        let get_const = self.get_const(bytes);
+        if let Some(lit) = get_const {
+            Ok(lit)
+        } else {
+            let string = unsafe { String::from_utf8_unchecked(bytes.to_vec()) };
+            if string.starts_with('[') && string.ends_with(']') {
+                // let bytess = &string[1..string.len() - 1];
+                todo!("pushing many at a time")
+            } else if string.starts_with('"') && string.ends_with('"') {
+                let s = &string[1..string.len() - 1];
+                let sb = self.program.register(s.to_owned());
+                Ok(self.register_single(Object {
+                    kind: ObjectKind::String,
+                    data: ObjectData::String(sb),
+                }))
+            } else if string == "true" {
+                Ok(self.register_single(Object {
+                    kind: ObjectKind::Bool,
+                    data: ObjectData::Bool(true),
+                }))
+            } else if string == "false" {
+                Ok(self.register_single(Object {
+                    kind: ObjectKind::Bool,
+                    data: ObjectData::Bool(false),
+                }))
+            } else if string == "Nil" {
+                Ok(self.register_single(Object::nil()))
+            } else if string.chars().all(|c| c.is_numeric()) {
+                let num: isize = match utils::string_to_t(string) {
+                    Ok(v) => v,
+                    Err(e) => return Err(e),
+                };
+                Ok(self.register_single(Object {
+                    kind: ObjectKind::Integer,
+                    data: ObjectData::Integer(num),
+                }))
+            } else if utils::string_is_float_like(string.clone()) {
+                let (wholestr, precstr) = string.split_at(string.find('.').unwrap());
+                let whole: i32 = match utils::string_to_t(wholestr.to_owned()) {
+                    Ok(v) => v,
+                    Err(e) => return Err(e),
+                };
+                let prec: u32 = match utils::string_to_t(precstr[1..].to_owned()) {
+                    Ok(v) => v,
+                    Err(e) => return Err(e),
+                };
+                Ok(self.register_single(Object {
+                    kind: ObjectKind::Float,
+                    data: ObjectData::Float(whole, prec),
+                }))
+            } else {
+                return Err(ProgramErrorKind::ParsingError(utils::display_bytes(bytes)));
+            }
         }
     }
 
     pub fn register_single(&mut self, obj: Object) -> RegObject {
-        unsafe { self.register_many([obj].as_slice()).get_unchecked(0) }
+        let saved_bytes = self.memory.alloc(&obj);
+        let saved_bytes: &'static mut Object = saved_bytes;
+        saved_bytes
     }
     pub fn register_single_mut(&mut self, obj: Object) -> MutableObject {
         let saved_bytes = self.memory.alloc_slice(&[obj]);
@@ -111,7 +172,7 @@ impl VM {
         len: usize,
         alloc: usize,
         n: usize,
-    ) -> Result<*const Object, ProgramError> {
+    ) -> Result<*const Object, ProgramErrorKind> {
         if n <= alloc {
             // shrink it baby
             // i dont actually want to do
@@ -141,7 +202,7 @@ impl VM {
                 }
             }
         }
-        self.error(ProgramErrorKind::TodoError)
+        Err(ProgramErrorKind::TodoError)
     }
 
     pub fn drop(&mut self, obj: RegObject) {
@@ -165,7 +226,7 @@ impl VM {
     }
 
     pub fn get_const(&self, name: &'static [u8]) -> Option<RegObject> {
-        self.consts.get(name).map(|v| &**v)
+        self.consts.get(name).map(|v| *v)
     }
 
     pub fn from_string(text: String, debug: bool) -> Self {
@@ -177,10 +238,10 @@ impl VM {
         Ok(Self::new(program, debug))
     }
 
-    pub fn from_ops(ops: Vec<Operation>, debug: bool) -> Self {
-        let program = Program::from_ops(ops);
-        Self::new(program, debug)
-    }
+    // pub fn from_ops(ops: Vec<Operation>, debug: bool) -> Self {
+    //     let program = Program::from_ops(ops);
+    //     Self::new(program, debug)
+    // }
 
     pub fn run(&mut self) {
         let mut ran_main = false;
@@ -207,49 +268,45 @@ impl VM {
                     )
                 }
             }
+
             let res = op.call(self);
 
             match res {
-                Ok(_) => {}
-                Err(e) => {
-                    println!("\nruntime failure:\n{}", e);
+                Response::Exit(code) => std::process::exit(code),
+                Response::Error(err) => {
+                    println!("\nruntime failure:\n{}", self.error(err));
                     std::process::exit(1);
                 }
+                Response::Ok => continue,
+                Response::BlockReturn => unreachable!(),
+                Response::IterationDone => break,
             }
+            // if self.counter == self.program.instructions.len() {
+            //     if !ran_main {
+            //         let main = self.program.register_bytes(b"main");
 
-            if self.counter == self.program.instructions.len() {
-                if !ran_main {
-                    let main = self.program.register_bytes(b"main");
-                    match self.program.funcs.get(main) {
-                        Some((idx, _)) => {
-                            let mut frame = Frame::new(self.counter, FrameKind::Main);
-                            frame.copy_locals(self.call_stack.last().unwrap());
-                            self.counter = *idx + 1;
-                            ran_main = true;
-                        }
-                        None => return,
-                    }
-                } else {
-                    return;
-                }
-            }
-
-            if let Operation::Exit = self.program.get_op(self.counter) {
-                return;
-            }
+            //         match self.program.funcs.get(main) {
+            //             Some((idx, _)) => {
+            //                 let _ = self.call(main);
+            //                 ran_main = true;
+            //             }
+            //             None => return,
+            //         }
+            //     } else {
+            //         return;
+            //     }
+            // }
         }
     }
 
-    pub fn run_block(&mut self, frame_type: FrameKind) {
-        while let Some(op) = self.next() {
-            // self.update_span();
-            if self.counter == self.program.instructions.len() - 1 {
-                return;
-            }
+    pub fn run_block(&mut self, block: &List<Operation>) {
+        let mut iter = block.iter();
+        while let Some(op) = iter.next() {
+            // println!("{}", op);
             if self.call_stack.len() > 100_000 {
                 panic!("call stack overflow");
             }
-            if self.obj_stack.len() > 1_000_000 {
+            if self.obj_stack.len() > 10_000_000 {
                 unsafe {
                     panic!(
                         "object stack overflow, {:?}",
@@ -264,20 +321,16 @@ impl VM {
             let res = op.call(self);
 
             match res {
-                Ok(_) => {}
-                Err(e) => {
-                    println!("\nruntime failure:\n{}", e);
+                Response::Exit(code) => std::process::exit(code),
+                Response::BlockReturn => break,
+                Response::Error(err) => {
+                    println!("\nruntime failure:\n{}", self.error(err));
                     std::process::exit(1);
                 }
-            }
-
-            if let Ok(frame) = self.call_stack.last() {
-                let op = self.program.get_op(self.counter);
-                if frame.kind == frame_type {
-                    match op {
-                        Operation::Done | Operation::Exit => return,
-                        _ => (),
-                    }
+                Response::Ok => continue,
+                Response::IterationDone => {
+                    let _ = self.call_stack.pop();
+                    // break;
                 }
             }
         }
@@ -302,18 +355,20 @@ impl VM {
             None => &Operation::Empty,
         };
         self.current_span = Span {
-            current_op: *self
+            current_op: self
                 .program
                 .instructions
                 .get(self.counter)
-                .unwrap_or(&Operation::Empty),
+                .unwrap_or(&Operation::Empty)
+                .clone(),
             program_count: self.counter,
-            prev_op: *prev_op,
-            next_op: *self
+            prev_op: prev_op.clone(),
+            next_op: self
                 .program
                 .instructions
                 .get(self.counter + 1)
-                .unwrap_or(&Operation::Empty),
+                .unwrap_or(&Operation::Empty)
+                .clone(),
         };
     }
 
@@ -321,32 +376,21 @@ impl VM {
     pub fn next(&mut self) -> Option<Operation> {
         let op = self.program.get_op(self.counter);
         self.counter += 1;
-        return Some(*op);
+        return Some(op.clone());
     }
 
-    pub fn jump(&mut self, func: &'static [u8]) {
-        let (idx, _arity) = *self
-            .program
-            .funcs
-            .get(func)
-            .unwrap_or_else(|| panic!("No such function: {:?}", func));
-        self.counter = idx;
-    }
-
+    #[inline]
     pub fn goto(&mut self, counter: usize) {
         self.counter = counter
     }
 
-    pub fn handle_bin_op(&mut self, kind: BinOpKind) -> Result<(), ProgramError> {
+    pub fn handle_bin_op(&mut self, kind: BinOpKind) -> Response {
         let pair = {
-            match unsafe { self.obj_stack.pop_n(2) } {
-                Ok(ts) => Ok(ts),
-                Err(_) => Err(ProgramError(
-                    ProgramErrorKind::StackError(2),
-                    self.current_span.clone(),
-                )),
+            match self.obj_stack.pop_n(2) {
+                Ok(ts) => ts,
+                Err(_) => return Response::Error(ProgramErrorKind::StackError(2)),
             }
-        }?;
+        };
         let lhs = pair[0].data;
         let rhs = pair[1].data;
 
@@ -375,24 +419,14 @@ impl VM {
         match result {
             Ok(value) => {
                 let value = self.register_single(value);
-                Ok(self.obj_stack.push(value))
+                self.obj_stack.push(value);
+                Response::Ok
             }
-            Err(e) => Err(ProgramError(e, self.current_span.clone())),
+            Err(e) => Response::Error(e),
         }
     }
 
-    pub fn unwrap_or_error<T>(
-        &self,
-        option: Option<T>,
-        kind: ProgramErrorKind,
-    ) -> Result<T, ProgramError> {
-        match utils::unwrap_or_error(option, kind) {
-            Ok(v) => Ok(v),
-            Err(e) => return Err(ProgramError(e, self.current_span.clone())),
-        }
-    }
-
-    pub fn error<T>(&mut self, e: ProgramErrorKind) -> Result<T, ProgramError> {
+    pub fn error(&mut self, e: ProgramErrorKind) -> ProgramError {
         self.update_span();
         match e {
             ProgramErrorKind::VariableExists(_) => {
@@ -429,6 +463,6 @@ impl VM {
             _ => {}
         };
 
-        Err(ProgramError(e, self.current_span.clone()))
+        ProgramError(e, self.current_span.clone())
     }
 }

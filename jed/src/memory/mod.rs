@@ -1,7 +1,9 @@
-
 pub mod chunk;
 pub mod dropless;
+pub mod list;
 pub mod manual;
+pub mod peekableiterator;
+pub mod stack;
 
 pub type Dropless = dropless::Dropless;
 pub type Manual<T> = manual::Manual<T>;

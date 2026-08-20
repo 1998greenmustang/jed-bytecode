@@ -1,15 +1,14 @@
 extern crate jed_macros;
-pub mod arena;
 mod binops;
 mod builtin;
 mod error;
 mod frame;
+pub mod memory;
 mod modules;
 mod object;
 pub mod operation;
 pub mod program;
 mod span;
-mod stack;
 mod unops;
 mod utils;
 pub mod vm;

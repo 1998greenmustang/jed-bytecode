@@ -64,9 +64,9 @@ impl Display for BinOpKind {
     }
 }
 
-impl From<&str> for BinOpKind {
-    fn from(value: &str) -> Self {
-        match value {
+impl From<String> for BinOpKind {
+    fn from(value: String) -> Self {
+        match value.as_str() {
             "+" => BinOpKind::Add,
             "-" => BinOpKind::Sub,
             "*" => BinOpKind::Mul,

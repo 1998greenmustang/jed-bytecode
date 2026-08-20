@@ -31,9 +31,9 @@ impl Display for BuiltIn {
     }
 }
 
-impl From<&str> for BuiltIn {
-    fn from(value: &str) -> Self {
-        match value {
+impl From<String> for BuiltIn {
+    fn from(value: String) -> Self {
+        match value.as_str() {
             "println" => BuiltIn::PrintLn,
             "sqrt" => BuiltIn::Sqrt,
             _ => panic!("No such builtin '{}'", value),

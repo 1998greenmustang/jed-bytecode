@@ -5,9 +5,7 @@
 // Rewriting here, for practice. For all intents and purposes, might as well be copied
 //
 
-use crate::arena::{align_down, align_up, HUGE_PAGE, PAGE};
-
-use super::chunk::Chunk;
+use super::{HUGE_PAGE, PAGE, align_down, align_up, chunk::Chunk};
 use std::slice;
 use std::{
     alloc::Layout,

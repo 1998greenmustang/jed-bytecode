@@ -29,9 +29,9 @@ impl Display for UnOpKind {
     }
 }
 
-impl From<&str> for UnOpKind {
-    fn from(value: &str) -> Self {
-        match value {
+impl From<String> for UnOpKind {
+    fn from(value: String) -> Self {
+        match value.as_str() {
             "++" => UnOpKind::Increment,
             "--" => UnOpKind::Decrement,
             "+" => UnOpKind::Plus,
