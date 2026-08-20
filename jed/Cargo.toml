@@ -1,6 +1,7 @@
 [package]
 name = "jed"
 version = "0.3.0"
+rust-version = "1.96"
 edition = "2024"
 
 [lints.clippy]

@@ -1,5 +1,7 @@
 use std::{
     alloc::{self, Layout},
+    marker::PhantomData,
+    mem::ManuallyDrop,
     ptr::{self, NonNull},
 };
 
@@ -11,13 +13,24 @@ pub struct Stack<T> {
     cap: usize,
     len: usize,
 }
+
+impl<T> Default for Stack<T> {
+    fn default() -> Self {
+        Self {
+            ptr: NonNull::dangling(),
+            cap: Default::default(),
+            len: Default::default(),
+        }
+    }
+}
+
 unsafe impl<T: Send> Send for Stack<T> {}
 
 unsafe impl<T: Sync> Sync for Stack<T> {}
 
 impl<T> Stack<T> {
     pub fn new() -> Stack<T> {
-        let mut this = Stack {
+        let mut this: Stack<T> = Stack {
             ptr: NonNull::dangling(),
             len: 0,
             cap: 0,
@@ -70,6 +83,15 @@ impl<T> Stack<T> {
         Ok(unsafe { ptr::read(self.ptr.as_ptr().add(self.len)) })
     }
 
+    pub fn pop_if(&mut self, predicate: impl FnOnce(&mut T) -> bool) -> Option<T> {
+        let last = self.last_mut_option()?;
+        if predicate(last) {
+            Some(unsafe { ptr::read(self.ptr.as_ptr().add(self.len)) })
+        } else {
+            None
+        }
+    }
+
     pub fn pop_mut(&mut self) -> Result<&mut T, ProgramErrorKind> {
         if self.len == 0 {
             return Err(ProgramErrorKind::StackError(1));
@@ -78,7 +100,7 @@ impl<T> Stack<T> {
         Ok(unsafe { &mut *self.ptr.as_ptr().add(self.len) })
     }
 
-    pub unsafe fn pop_n(&mut self, n: usize) -> Result<&[T], ProgramErrorKind> {
+    pub fn pop_n(&mut self, n: usize) -> Result<&[T], ProgramErrorKind> {
         unsafe {
             if n > self.len {
                 Err(ProgramErrorKind::StackError(n))
@@ -90,7 +112,7 @@ impl<T> Stack<T> {
         }
     }
 
-    pub fn len(&mut self) -> usize {
+    pub fn len(&self) -> usize {
         self.len
     }
 
@@ -141,6 +163,40 @@ impl<T> Stack<T> {
             Ok(std::slice::from_raw_parts(nth, num))
         }
     }
+
+    pub fn iter<'a>(&self) -> StackIter<'a, T> {
+        unsafe {
+            let me = ManuallyDrop::new(self);
+            let begin = me.ptr.as_ptr();
+            let end = begin.add(me.len) as *mut T;
+            StackIter {
+                ptr: NonNull::new_unchecked(me.ptr.as_ptr() as *mut T),
+                begin: NonNull::new_unchecked(me.ptr.as_ptr() as *mut T),
+                cap: me.cap,
+                end,
+                _marker: PhantomData,
+            }
+        }
+    }
+
+    pub fn iter_mut<'a>(&mut self) -> StackIterMut<'a, T> {
+        unsafe {
+            let me = ManuallyDrop::new(self);
+            let begin = me.ptr.as_ptr();
+            let end = begin.add(me.len) as *mut T;
+            StackIterMut {
+                ptr: NonNull::new_unchecked(me.ptr.as_ptr() as *mut T),
+                begin: NonNull::new_unchecked(me.ptr.as_ptr() as *mut T),
+                cap: me.cap,
+                end,
+                _marker: PhantomData,
+            }
+        }
+    }
+
+    pub fn swap(&mut self) {
+        unsafe { self.ptr.swap(self.ptr.add(1)) };
+    }
 }
 
 impl<T> Drop for Stack<T> {
@@ -154,3 +210,88 @@ impl<T> Drop for Stack<T> {
         }
     }
 }
+
+pub struct StackIterMut<'a, T> {
+    begin: NonNull<T>,
+    ptr: NonNull<T>,
+    end: *const T,
+    cap: usize,
+    _marker: PhantomData<&'a T>,
+}
+
+impl<'a, T> Iterator for StackIterMut<'a, T> {
+    type Item = &'a mut T;
+    #[inline]
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.ptr.as_ptr() != self.end.cast_mut() {
+            let old = self.ptr;
+            self.ptr = unsafe { old.add(1) };
+            Some(unsafe { self.ptr.as_mut() })
+        } else {
+            None
+        }
+    }
+}
+
+impl<'a, T> DoubleEndedIterator for StackIterMut<'a, T> {
+    #[inline]
+    fn next_back(&mut self) -> Option<Self::Item> {
+        if self.ptr.as_ptr() != self.end.cast_mut() {
+            unsafe {
+                self.end = self.end.sub(1);
+                Some(self.end.cast_mut().as_mut()?)
+            }
+        } else {
+            None
+        }
+    }
+}
+
+pub struct StackIter<'a, T> {
+    begin: NonNull<T>,
+    ptr: NonNull<T>,
+    end: *const T,
+    cap: usize,
+    _marker: PhantomData<&'a T>,
+}
+
+impl<'a, T> Iterator for StackIter<'a, T> {
+    type Item = T;
+    #[inline]
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.ptr.as_ptr() != self.end.cast_mut() {
+            let old = self.ptr;
+            self.ptr = unsafe { old.add(1) };
+            Some(unsafe { self.ptr.read() })
+        } else {
+            None
+        }
+    }
+}
+
+impl<'a, T> DoubleEndedIterator for StackIter<'a, T> {
+    #[inline]
+    fn next_back(&mut self) -> Option<Self::Item> {
+        if self.ptr.as_ptr() != self.end.cast_mut() {
+            unsafe {
+                self.end = self.end.sub(1);
+                Some(self.end.read())
+            }
+        } else {
+            None
+        }
+    }
+}
+// impl<T> Deref for Stack<T> {
+//     type Target = T;
+
+//     fn deref(&self) -> &Self::Target {
+//         unsafe { &self.ptr.as_ref() }
+//     }
+// }
+
+// impl<T> DerefMut for Stack<T> {
+//     fn deref_mut(&mut self) -> &mut Self::Target {
+//         todo!()
+//     }
+// }

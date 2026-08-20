@@ -11,6 +11,7 @@ pub enum FrameKind {
     Call,
     Main,
     Initial,
+    RangeLoop,
 }
 
 #[derive(Debug, Clone)]
@@ -25,7 +26,7 @@ pub struct Frame {
 impl Frame {
     pub fn new(return_address: usize, kind: FrameKind) -> Self {
         Frame {
-            memo_key: (0, &[]),
+            memo_key: (&[], &[]),
             locals: BTreeMap::new(),
             return_address,
             kind,

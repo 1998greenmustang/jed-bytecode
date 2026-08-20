@@ -1,9 +1,13 @@
 use std::{
+    cell::RefCell,
     fmt::{Debug, Display},
+    rc::Rc,
     u8,
 };
 
-use crate::utils;
+use rug::Integer;
+
+use crate::{error::ProgramErrorKind, memory::list::List, utils};
 
 pub type MutableObject = &'static mut Object;
 pub type RegObject = &'static Object;
@@ -20,6 +24,26 @@ pub enum ObjectKind {
     Nil,
     List,
     Iterator,
+    BigInteger,
+    UnsignedInt,
+}
+
+impl From<ObjectData> for ObjectKind {
+    fn from(value: ObjectData) -> Self {
+        match value {
+            ObjectData::Integer(_) => ObjectKind::Integer,
+            ObjectData::Float(_, _) => ObjectKind::Float,
+            ObjectData::UnsignedInt(_) => ObjectKind::UnsignedInt,
+            ObjectData::String(items) => ObjectKind::String,
+            ObjectData::Bool(_) => ObjectKind::Bool,
+            ObjectData::Func(items) => ObjectKind::Func,
+            ObjectData::List(_) => ObjectKind::List,
+            ObjectData::Pointer(_) => ObjectKind::Pointer,
+            ObjectData::Iterator(_, _) => ObjectKind::Iterator,
+            ObjectData::BigInteger(integer) => ObjectKind::BigInteger,
+            ObjectData::Nil => ObjectKind::Nil,
+        }
+    }
 }
 
 #[derive(Hash, PartialEq, Eq, Debug, Copy, Clone, PartialOrd, Ord)]
@@ -36,9 +60,10 @@ pub enum ObjectData {
     String(&'static [u8]),
     Bool(bool),
     Func(&'static [u8]),
-    List(*mut usize, *mut usize, *mut usize), // pointer address to the starting object, end, allocated
+    List(*mut Rc<RefCell<List<RegObject>>>),
     Pointer(*mut RegObject),
     Iterator(*const ObjectData, *mut usize), // start, next
+    BigInteger(Integer),
     Nil,
 }
 
@@ -61,12 +86,11 @@ impl Debug for ObjectData {
             ObjectData::Func(items) => write!(f, "func ({})", utils::display_bytes(items)),
             ObjectData::Pointer(pr) => write!(f, "ptr ({pr:p})"),
             ObjectData::Nil => write!(f, "Nil"),
-            ObjectData::List(start, len, _alloc) => unsafe {
-                write!(f, "list (@{:p}, {})", **start as *const Object, **len)
-            },
+            ObjectData::List(list) => unsafe { write!(f, "list (@{:?})", list) },
             ObjectData::Iterator(list, next) => {
                 write!(f, "iterate (@{:?}, next: {:?})", list, next)
             }
+            ObjectData::BigInteger(i) => write!(f, "bigint ({i})"),
         }
     }
 }
@@ -82,20 +106,9 @@ impl Display for ObjectData {
             ObjectData::Pointer(pr) => write!(f, "{pr:p}"),
             ObjectData::Nil => write!(f, "Nil"),
             ObjectData::UnsignedInt(_) => todo!(),
-            ObjectData::List(start, len, _alloc) => unsafe {
-                let start = **start as *const Object;
-                write!(f, "[")?;
-                for idx in 0..**len {
-                    let addr = start.add(idx);
-                    write!(f, "{}", (addr as *const Object).read())?;
-
-                    if idx < (**len) - 1 {
-                        write!(f, ",")?
-                    }
-                }
-                write!(f, "]")
-            },
+            ObjectData::List(list) => write!(f, "{}", unsafe { (**list).borrow() }),
             ObjectData::Iterator(_list_ptr, _next) => write!(f, "<iterator>",),
+            ObjectData::BigInteger(i) => write!(f, "{i}"),
         }
     }
 }
@@ -112,6 +125,8 @@ impl Display for ObjectKind {
             ObjectKind::Nil => write!(f, "Nil"),
             ObjectKind::List => write!(f, "List"),
             ObjectKind::Iterator => write!(f, "Iterator"),
+            ObjectKind::BigInteger => write!(f, "BigInteger"),
+            ObjectKind::UnsignedInt => todo!(),
         }
     }
 }
@@ -157,6 +172,21 @@ impl From<(i32, u32)> for Object {
         Object {
             kind: ObjectKind::Float,
             data: ObjectData::Float(value.0, value.1),
+        }
+    }
+}
+
+impl TryInto<usize> for ObjectData {
+    type Error = ProgramErrorKind;
+
+    fn try_into(self) -> Result<usize, Self::Error> {
+        match self {
+            ObjectData::Integer(i) => Ok(i as usize),
+            ObjectData::UnsignedInt(u) => Ok(u),
+            _ => Err(ProgramErrorKind::TypeError(
+                ObjectKind::Integer,
+                self.into(),
+            )),
         }
     }
 }
