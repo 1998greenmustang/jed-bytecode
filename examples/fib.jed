@@ -1,4 +1,4 @@
-func fib 1
+func fib 1 {
 	store_name n
 	
 	push_name n
@@ -17,10 +17,12 @@ func fib 1
 	call fib
 	
 	bin_op +
-done
+}
 
-func main 0
-	push_lit 14
+func main 0 {
+	push_lit 16
 	call fib
 	call_built_in println
-done
+}
+
+call main

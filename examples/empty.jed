@@ -1,2 +1,2 @@
-func main 0
-done
+func main 0 {}
+call main

@@ -1,9 +1,9 @@
-func main 0
+func main 0 {
 	push_lit 0
 	store_name i
 	
 	push_lit 10
-	do_for
+	do_for {
 		push_name i
 		call_built_in println
 
@@ -11,5 +11,6 @@ func main 0
 		push_lit 1
 		bin_op +
 		store_name i
-	done
-exit
+	}
+}
+call main

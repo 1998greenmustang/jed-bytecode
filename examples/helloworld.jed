@@ -1,4 +1,20 @@
-func main 0
-push_lit "Hello world!"
-call_built_in println
-done
+push_lit true
+push_lit true
+create_list
+get_iter
+iterate {
+	push_lit true
+	push_lit true
+	create_list
+	get_iter
+	store_temp
+	push_temp
+	iterate {
+		push_lit true
+		do_if {
+			push_temp
+			iter_current
+			call_built_in println
+		}
+	}
+}

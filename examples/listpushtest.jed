@@ -1,4 +1,4 @@
-func main 0
+func main 0 {
 	push_lit 10
 	push_lit 0
 	push_lit 5
@@ -21,7 +21,7 @@ func main 0
 	
 	push_name num
 	get_iter
-	iterate
+	iterate {
 		call_built_in println
-	done
-exit
+	}
+}

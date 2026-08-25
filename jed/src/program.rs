@@ -167,7 +167,7 @@ impl Program {
                     GetPtr,
                     ReadPtr,
                     SetPtr,
-                    GetIter,
+                    CreateIter,
                     IterNext,
                     IterPrev,
                     IterSkip,

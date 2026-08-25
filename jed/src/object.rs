@@ -1,13 +1,14 @@
+use crate::{
+    error::ProgramErrorKind,
+    memory::list::{List, ListIter},
+    utils,
+};
 use std::{
     cell::RefCell,
     fmt::{Debug, Display},
     rc::Rc,
     u8,
 };
-
-use rug::Integer;
-
-use crate::{error::ProgramErrorKind, memory::list::List, utils};
 
 pub type MutableObject = &'static mut Object;
 pub type RegObject = &'static Object;
@@ -34,13 +35,13 @@ impl From<ObjectData> for ObjectKind {
             ObjectData::Integer(_) => ObjectKind::Integer,
             ObjectData::Float(_, _) => ObjectKind::Float,
             ObjectData::UnsignedInt(_) => ObjectKind::UnsignedInt,
-            ObjectData::String(items) => ObjectKind::String,
+            ObjectData::String(_) => ObjectKind::String,
             ObjectData::Bool(_) => ObjectKind::Bool,
-            ObjectData::Func(items) => ObjectKind::Func,
+            ObjectData::Func(_) => ObjectKind::Func,
             ObjectData::List(_) => ObjectKind::List,
             ObjectData::Pointer(_) => ObjectKind::Pointer,
-            ObjectData::Iterator(_, _) => ObjectKind::Iterator,
-            ObjectData::BigInteger(integer) => ObjectKind::BigInteger,
+            ObjectData::Iterator(_) => ObjectKind::Iterator,
+            // ObjectData::BigInteger(integer) => ObjectKind::BigInteger,
             ObjectData::Nil => ObjectKind::Nil,
         }
     }
@@ -62,8 +63,8 @@ pub enum ObjectData {
     Func(&'static [u8]),
     List(*mut Rc<RefCell<List<RegObject>>>),
     Pointer(*mut RegObject),
-    Iterator(*const ObjectData, *mut usize), // start, next
-    BigInteger(Integer),
+    Iterator(*mut Rc<RefCell<ListIter<RegObject>>>), // start, next
+    // BigInteger(Integer),
     Nil,
 }
 
@@ -86,11 +87,10 @@ impl Debug for ObjectData {
             ObjectData::Func(items) => write!(f, "func ({})", utils::display_bytes(items)),
             ObjectData::Pointer(pr) => write!(f, "ptr ({pr:p})"),
             ObjectData::Nil => write!(f, "Nil"),
-            ObjectData::List(list) => unsafe { write!(f, "list (@{:?})", list) },
-            ObjectData::Iterator(list, next) => {
-                write!(f, "iterate (@{:?}, next: {:?})", list, next)
-            }
-            ObjectData::BigInteger(i) => write!(f, "bigint ({i})"),
+            ObjectData::List(list) => write!(f, "list (@{:?})", list),
+            ObjectData::Iterator(iter) => {
+                write!(f, "iterate (@{:?})", iter)
+            } // ObjectData::BigInteger(i) => write!(f, "bigint ({i})"),
         }
     }
 }
@@ -107,8 +107,8 @@ impl Display for ObjectData {
             ObjectData::Nil => write!(f, "Nil"),
             ObjectData::UnsignedInt(_) => todo!(),
             ObjectData::List(list) => write!(f, "{}", unsafe { (**list).borrow() }),
-            ObjectData::Iterator(_list_ptr, _next) => write!(f, "<iterator>",),
-            ObjectData::BigInteger(i) => write!(f, "{i}"),
+            ObjectData::Iterator(iter) => write!(f, "<iterator (@{iter:?})>"),
+            // ObjectData::BigInteger(i) => write!(f, "{i}"),
         }
     }
 }

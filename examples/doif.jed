@@ -1,0 +1,14 @@
+func tester 1 {
+	do_if {
+		push_lit "true!"
+		call_built_in println
+	} else {
+		push_lit "false."
+		call_built_in println
+	}
+}
+
+push_lit true
+call tester
+push_lit false
+call tester

@@ -1,4 +1,4 @@
-func main 0
+func main 0 {
 	push_lit 5
 	push_lit 10
 	create_list 2
@@ -27,6 +27,4 @@ func main 0
 	push_name iterable
 	iter_prev
 	call_built_in println
-
-
-exit
+}

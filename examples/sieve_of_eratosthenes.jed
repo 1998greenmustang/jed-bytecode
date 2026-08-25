@@ -1,4 +1,4 @@
-func main 0
+func main 0 {
 	push_lit 1000000
 	store_name n
 
@@ -8,10 +8,11 @@ func main 0
 	push_name n
 	push_lit 1
 	bin_op -
-	do_for
+	do_for {
 		push_lit true
-	done
+	}
 	create_list
+
 	store_name prime
 
 # falsify prime index
@@ -24,17 +25,14 @@ func main 0
 	bin_op +
 	
 	push_lit 1
-	
-	push_range
-	create_list
-	get_iter
-	iterate
+
+	range_loop {
 		store_temp
 		push_name prime
 		push_temp
 		list_get
 
-		do_if
+		do_if {
 			push_temp
 			push_temp
 			bin_op *
@@ -44,30 +42,26 @@ func main 0
 			bin_op +
 
 			push_temp
-			push_range
-			create_list
-			get_iter
-			iterate
+			range_loop {
 				store_temp
 				push_lit false
 				push_name prime
 				push_temp
 				list_set
-			done
-		done
-	done
+			}
+		}
+	}
 
-
-# print if prime
 	push_name prime
 	get_iter
 	store_name iter
 	push_name iter
-	iterate
-		do_if
+	iterate {
+		do_if {
 			push_name iter
 			iter_current
 			call_built_in println
-		done
-	done
-done
+		}
+	}
+}
+call main

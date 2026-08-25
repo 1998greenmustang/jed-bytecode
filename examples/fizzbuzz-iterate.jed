@@ -1,5 +1,4 @@
-
-func fizzbuzz 1
+func fizzbuzz 1 {
 	store_name n
 
 	push_name n
@@ -28,9 +27,9 @@ func fizzbuzz 1
 	return_if_const buzz
 	
 	push_name n
-done
+}
 
-func main 0
+func main 0 {
 	push_lit 1
 	push_lit 10001
 	push_lit 1
@@ -50,16 +49,17 @@ func main 0
 	store_name nums_iter
 
 	push_name nums_iter
-	iterate
+	iterate {
 		call fizzbuzz
 		
 		push_name nums
 		push_name nums_iter
 		iter_current
 		list_set 
-	done
+	}
 
 	push_name nums
 	push_name nums
 	call_built_in println
-exit
+}
+call main

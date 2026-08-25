@@ -58,7 +58,7 @@ pub enum Operation {
     GetPtr,
     ReadPtr,
     SetPtr,
-    GetIter,
+    CreateIter,
     IterNext,
     IterPrev,
     IterSkip,
@@ -250,15 +250,12 @@ impl Operation {
                             vm.run_block(&Rc::clone(block));
                         }
                     },
-                    (ObjectKind::Iterator, ObjectData::Iterator(list_ptr, _next)) => unsafe {
-                        let list = *list_ptr;
-                        if let ObjectData::List(list) = list {
-                            for _ in 0..(*list).borrow().len() {
-                                vm.counter = pc;
-                                vm.run_block(&Rc::clone(block));
-                            }
+                    (ObjectKind::Iterator, ObjectData::Iterator(iter)) => {
+                        while let Some(_obj) = (unsafe { (*iter).clone() }).borrow_mut().next() {
+                            vm.counter = pc;
+                            vm.run_block(&Rc::clone(block));
                         }
-                    },
+                    }
 
                     (kind, _data) => {
                         return Response::Error(ProgramErrorKind::TypeError(
@@ -533,149 +530,125 @@ impl Operation {
                     Err(_) => Response::Error(ProgramErrorKind::StackError(2)),
                 }
             },
-            Operation::GetIter => match { vm.obj_stack.pop() } {
-                Ok(list_obj) => {
-                    if let ObjectKind::List = list_obj.kind {
-                        let initial_index = Box::new(0);
+            Operation::CreateIter => match { vm.obj_stack.pop() } {
+                Ok(list_obj) => match list_obj.data {
+                    ObjectData::List(ls) => {
+                        let iter = Box::new(Rc::new(RefCell::new(
+                            (unsafe { (*ls).clone() }).borrow().iter(),
+                        )));
                         let iter_obj = Object {
                             kind: ObjectKind::Iterator,
-                            data: ObjectData::Iterator(
-                                &list_obj.data as *const ObjectData as *mut ObjectData,
-                                Box::into_raw(initial_index),
-                            ),
+                            data: ObjectData::Iterator(Box::into_raw(iter)),
                         };
                         let iter_obj: RegObject = vm.register_single(iter_obj);
                         vm.obj_stack.push(iter_obj);
                         Response::Ok
-                    } else {
-                        Response::Error(ProgramErrorKind::TypeError(
-                            ObjectKind::List,
-                            list_obj.kind,
-                        ))
                     }
-                }
+                    _ => Response::Error(ProgramErrorKind::TypeError(
+                        ObjectKind::List,
+                        list_obj.kind,
+                    )),
+                },
                 Err(_) => Response::Error(ProgramErrorKind::StackError(1)),
             },
-            Operation::IterNext => unsafe {
-                match { vm.obj_stack.pop_mut() } {
-                    Ok(&mut &Object { kind, mut data }) => {
-                        if let ObjectData::Iterator(list_ptr, ref mut next) = data {
-                            let list = *list_ptr;
-                            if let ObjectData::List(list) = list {
-                                if **next < (*list).borrow().len() {
-                                    vm.obj_stack.push((*list).borrow().get_unchecked(**next));
-                                    **next += 1;
-                                    Response::Ok
-                                } else {
-                                    Response::Error(ProgramErrorKind::IterNext(
-                                        (*list).borrow().len(),
-                                    ))
-                                }
-                            } else {
-                                unreachable!();
-                            }
-                        } else {
-                            Response::Error(ProgramErrorKind::TypeError(ObjectKind::Iterator, kind))
-                        }
+            // Operation::IterNext => unsafe {
+            //     match { vm.obj_stack.pop_mut() } {
+            //         Ok(&mut &Object { kind, mut data }) => {
+            //             if let ObjectData::Iterator(list_ptr, ref mut next) = data {
+            //                 let list = *list_ptr;
+            //                 if let ObjectData::List(list) = list {
+            //                     if **next < (*list).borrow().len() {
+            //                         vm.obj_stack.push((*list).borrow().get_unchecked(**next));
+            //                         **next += 1;
+            //                         Response::Ok
+            //                     } else {
+            //                         Response::Error(ProgramErrorKind::IterNext(
+            //                             (*list).borrow().len(),
+            //                         ))
+            //                     }
+            //                 } else {
+            //                     unreachable!();
+            //                 }
+            //             } else {
+            //                 Response::Error(ProgramErrorKind::TypeError(ObjectKind::Iterator, kind))
+            //             }
+            //         }
+            //         Err(_) => Response::Error(ProgramErrorKind::StackError(1)),
+            //     }
+            // },
+            // Operation::IterPrev => unsafe {
+            //     match { vm.obj_stack.pop_mut() } {
+            //         Ok(&mut &Object { kind, mut data }) => {
+            //             if let ObjectData::Iterator(list_ptr, ref mut next) = data {
+            //                 let list = *list_ptr;
+            //                 if let ObjectData::List(list) = list {
+            //                     let cur_val = **next;
+            //                     if cur_val == 0 {
+            //                         Response::Error(ProgramErrorKind::IterPrevious)
+            //                     } else {
+            //                         **next -= 1;
+            //                         vm.obj_stack.push((*list).borrow().get_unchecked(**next));
+            //                         Response::Ok
+            //                     }
+            //                 } else {
+            //                     unreachable!();
+            //                 }
+            //             } else {
+            //                 return Response::Error(ProgramErrorKind::TypeError(
+            //                     ObjectKind::Iterator,
+            //                     kind,
+            //                 ));
+            //             }
+            //         }
+            //         Err(_) => Response::Error(ProgramErrorKind::StackError(1)),
+            //     }
+            // },
+            // Operation::IterSkip => {
+            //     // TODO
+            //     Response::Ok
+            // }
+            // Operation::IterCurrent => unsafe {
+            //     match { vm.obj_stack.pop_mut() } {
+            //         Ok(&mut Object { kind, data }) => {
+            //             if let ObjectData::Iterator(_list_ptr, next) = data {
+            //                 let val = if **next != 0 {
+            //                     (**next) - 1
+            //                 } else {
+            //                     return Response::Error(ProgramErrorKind::TodoError);
+            //                 };
+            //                 let obj = Object {
+            //                     kind: ObjectKind::Integer,
+            //                     data: ObjectData::Integer(val as isize),
+            //                 };
+            //                 let obj: RegObject = vm.register_single(obj);
+            //                 vm.obj_stack.push(obj);
+            //                 Response::Ok
+            //             } else {
+            //                 Response::Error(ProgramErrorKind::TypeError(
+            //                     ObjectKind::Iterator,
+            //                     *kind,
+            //                 ))
+            //             }
+            //         }
+            //         Err(_) => Response::Error(ProgramErrorKind::StackError(1)),
+            //     }
+            // },
+            Operation::Iterate(block) => match { vm.obj_stack.pop_mut() } {
+                Ok(&mut Object {
+                    kind,
+                    data: ObjectData::Iterator(iter),
+                }) => {
+                    // (unsafe { (*ls).clone() }).borrow().iter(),
+                    while let Some(obj) = (unsafe { (**iter).clone() }).borrow_mut().next() {
+                        vm.obj_stack.push(obj);
+                        vm.run_block(&Rc::clone(block));
                     }
-                    Err(_) => Response::Error(ProgramErrorKind::StackError(1)),
+                    Response::IterationDone
                 }
-            },
-            Operation::IterPrev => unsafe {
-                match { vm.obj_stack.pop_mut() } {
-                    Ok(&mut &Object { kind, mut data }) => {
-                        if let ObjectData::Iterator(list_ptr, ref mut next) = data {
-                            let list = *list_ptr;
-                            if let ObjectData::List(list) = list {
-                                let cur_val = **next;
-                                if cur_val == 0 {
-                                    Response::Error(ProgramErrorKind::IterPrevious)
-                                } else {
-                                    **next -= 1;
-                                    vm.obj_stack.push((*list).borrow().get_unchecked(**next));
-                                    Response::Ok
-                                }
-                            } else {
-                                unreachable!();
-                            }
-                        } else {
-                            return Response::Error(ProgramErrorKind::TypeError(
-                                ObjectKind::Iterator,
-                                kind,
-                            ));
-                        }
-                    }
-                    Err(_) => Response::Error(ProgramErrorKind::StackError(1)),
+                Ok(Object { kind, data }) => {
+                    Response::Error(ProgramErrorKind::TypeError(ObjectKind::Iterator, *kind))
                 }
-            },
-            Operation::IterSkip => {
-                // TODO
-                Response::Ok
-            }
-            Operation::IterCurrent => unsafe {
-                match { vm.obj_stack.pop_mut() } {
-                    Ok(&mut Object { kind, data }) => {
-                        if let ObjectData::Iterator(_list_ptr, next) = data {
-                            let val = if **next != 0 {
-                                (**next) - 1
-                            } else {
-                                return Response::Error(ProgramErrorKind::TodoError);
-                            };
-                            let obj = Object {
-                                kind: ObjectKind::Integer,
-                                data: ObjectData::Integer(val as isize),
-                            };
-                            let obj: RegObject = vm.register_single(obj);
-                            vm.obj_stack.push(obj);
-                            Response::Ok
-                        } else {
-                            Response::Error(ProgramErrorKind::TypeError(
-                                ObjectKind::Iterator,
-                                *kind,
-                            ))
-                        }
-                    }
-                    Err(_) => Response::Error(ProgramErrorKind::StackError(1)),
-                }
-            },
-            Operation::Iterate(block) => unsafe {
-                match { vm.obj_stack.pop_mut() } {
-                    Ok(&mut Object { kind, data }) => {
-                        if let ObjectData::Iterator(list_ptr, next) = data {
-                            let list = **list_ptr;
-                            if let ObjectData::List(list) = list {
-                                let len = (*list).borrow().len();
-                                if len != 0 && **next < len {
-                                    let last_frame = match vm.call_stack.last() {
-                                        Ok(it) => it,
-                                        Err(err) => return Response::Error(err),
-                                    };
-                                    let mut new_frame =
-                                        Frame::new(vm.counter, FrameKind::IterateLoop);
-                                    new_frame.copy_locals(last_frame);
-                                    vm.call_stack.push(new_frame);
-
-                                    for n in (**next)..len {
-                                        **next = n + 1;
-                                        vm.obj_stack.push((*list).borrow().get_unchecked(n));
-
-                                        vm.run_block(&Rc::clone(block));
-                                    }
-                                    // let _ = vm.call_stack.pop();
-                                }
-                                return Response::IterationDone;
-                            } else {
-                                unreachable!()
-                            }
-                        } else {
-                            Response::Error(ProgramErrorKind::TypeError(
-                                ObjectKind::Iterator,
-                                *kind,
-                            ))
-                        }
-                    }
-                    Err(_) => Response::Error(ProgramErrorKind::StackError(1)),
-                }
+                Err(_) => Response::Error(ProgramErrorKind::StackError(1)),
             },
             Operation::DoIf(block) => match { vm.obj_stack.pop() } {
                 Ok(b) => {

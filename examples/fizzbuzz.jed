@@ -1,4 +1,4 @@
-func fizzbuzz 1
+func fizzbuzz 1 {
 	store_name n
 
 	push_name n
@@ -27,37 +27,26 @@ func fizzbuzz 1
 	return_if_const buzz
 	
 	push_name n
-done
+}
 
-func main 0
-	push_lit 1
-	push_lit 10001
-	push_lit 1
-	push_range
-	create_list 10000
-	store_name nums
-	
+func main 0 {
 	push_lit "FizzBuzz"
 	store_const fizzbuzz
 	push_lit "Fizz"
 	store_const fizz
 	push_lit "Buzz"
 	store_const buzz
+	push_lit Nil
+	store_const none
 
-	push_name nums
-	get_iter
-	store_name nums_iter
-	do_for_in nums
-		push_name nums_iter
-		iter_next
+	push_lit 1
+	push_lit 10001
+	push_lit 1
+	range_loop {
 		call fizzbuzz
 		
-		push_name nums
-		push_name nums_iter
-		iter_current
-		list_set 
-	done
+		call_built_in println
+	}
+}
 
-	push_name nums
-	call_built_in println
-done
+call main 

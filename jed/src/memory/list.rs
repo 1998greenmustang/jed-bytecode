@@ -154,7 +154,7 @@ impl<T> List<T> {
         }
     }
 
-    pub fn iter<'a>(&self) -> ListIter<'a, T> {
+    pub fn iter(&self) -> ListIter<T> {
         unsafe {
             let me = ManuallyDrop::new(self);
             let end = me.ptr.as_ptr().add(me.len) as *const T;
@@ -301,14 +301,14 @@ impl<'a, T> DoubleEndedIterator for ListIterMut<'a, T> {
     }
 }
 
-pub struct ListIter<'a, T> {
+pub struct ListIter<T: 'static> {
     ptr: *const T,
     end: *const T,
-    _marker: PhantomData<&'a T>,
+    _marker: PhantomData<&'static T>,
 }
 
-impl<'a, T: std::fmt::Debug> Iterator for ListIter<'a, T> {
-    type Item = &'a T;
+impl<T: std::fmt::Debug> Iterator for ListIter<T> {
+    type Item = &'static T;
     #[inline]
     fn next(&mut self) -> Option<Self::Item> {
         if self.ptr != self.end {
@@ -321,7 +321,7 @@ impl<'a, T: std::fmt::Debug> Iterator for ListIter<'a, T> {
     }
 }
 
-impl<'a, T: std::fmt::Debug> DoubleEndedIterator for ListIter<'a, T> {
+impl<T: std::fmt::Debug> DoubleEndedIterator for ListIter<T> {
     #[inline]
     fn next_back(&mut self) -> Option<Self::Item> {
         if self.ptr != self.end {
