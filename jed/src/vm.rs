@@ -1,12 +1,17 @@
-use std::{collections::HashMap, fs::File, io};
+use std::{
+    cell::RefCell,
+    collections::{BTreeMap, HashMap},
+    fs::File,
+    io,
+    rc::Rc,
+};
 
 use crate::{
-    binops::{self, BinOpKind},
     error::{ProgramError, ProgramErrorKind},
     frame::{Frame, FrameKind},
     memory::{self, list::List, stack::Stack},
     object::{MutableObject, Object, ObjectData, ObjectKind, RegObject},
-    operation::{Block, Operation, Response},
+    operation::{Operation, Response},
     program::Program,
     span::Span,
     utils,
@@ -41,8 +46,46 @@ impl VM {
         }
     }
 
+    pub fn create_object(&mut self, name: &'static [u8]) -> Response {
+        if let Some(Operation::Object(_name, arity, block)) =
+            self.program.constructors.get(name).cloned()
+        {
+            let obj = self.register_single(Object::new(ObjectData::Data(Box::into_raw(Box::new(
+                HashMap::new(),
+            )))));
+            if self.obj_stack.len() >= arity {
+                self.obj_stack.push(obj);
+                self.run_block(&block);
+                Response::Ok
+            } else {
+                Response::Error(ProgramErrorKind::StackError(arity))
+            }
+        } else {
+            Response::Error(ProgramErrorKind::TodoError)
+        }
+    }
+
     pub fn call(&mut self, name: &'static [u8]) -> Response {
         match self.program.funcs.get(name).cloned() {
+            Some(Operation::ExternFunc(_name, arity, func)) => {
+                let args = {
+                    match self.obj_stack.pop_n(arity) {
+                        Ok(ts) => ts,
+                        Err(_) => return Response::Error(ProgramErrorKind::StackError(arity)),
+                    }
+                };
+                let res = func(args);
+                match res {
+                    Response::ExternReturn(maybe_obj) => {
+                        if let Some(obj) = maybe_obj {
+                            let obj = self.register_single(obj);
+                            self.obj_stack.push(obj);
+                        }
+                        Response::Ok
+                    }
+                    _ => res,
+                }
+            }
             Some(Operation::Func(name, arity, block)) => {
                 // println!("{block}");
                 let args = {
@@ -88,7 +131,7 @@ impl VM {
                     }
                 }
             }
-            _ => todo!(),
+            _ => Response::Error(ProgramErrorKind::FunctionExists(name)),
         }
     }
 
@@ -104,20 +147,11 @@ impl VM {
             } else if string.starts_with('"') && string.ends_with('"') {
                 let s = &string[1..string.len() - 1];
                 let sb = self.program.register(s.to_owned());
-                Ok(self.register_single(Object {
-                    kind: ObjectKind::String,
-                    data: ObjectData::String(sb),
-                }))
+                Ok(self.register_single(Object::new(ObjectData::String(sb))))
             } else if string == "true" {
-                Ok(self.register_single(Object {
-                    kind: ObjectKind::Bool,
-                    data: ObjectData::Bool(true),
-                }))
+                Ok(self.register_single(Object::new(ObjectData::Bool(true))))
             } else if string == "false" {
-                Ok(self.register_single(Object {
-                    kind: ObjectKind::Bool,
-                    data: ObjectData::Bool(false),
-                }))
+                Ok(self.register_single(Object::new(ObjectData::Bool(false))))
             } else if string == "Nil" {
                 Ok(self.register_single(Object::nil()))
             } else if string.chars().all(|c| c.is_numeric()) {
@@ -125,24 +159,10 @@ impl VM {
                     Ok(v) => v,
                     Err(e) => return Err(e),
                 };
-                Ok(self.register_single(Object {
-                    kind: ObjectKind::Integer,
-                    data: ObjectData::Integer(num),
-                }))
+                Ok(self.register_single(num.into()))
             } else if utils::string_is_float_like(string.clone()) {
-                let (wholestr, precstr) = string.split_at(string.find('.').unwrap());
-                let whole: i32 = match utils::string_to_t(wholestr.to_owned()) {
-                    Ok(v) => v,
-                    Err(e) => return Err(e),
-                };
-                let prec: u32 = match utils::string_to_t(precstr[1..].to_owned()) {
-                    Ok(v) => v,
-                    Err(e) => return Err(e),
-                };
-                Ok(self.register_single(Object {
-                    kind: ObjectKind::Float,
-                    data: ObjectData::Float(whole, prec),
-                }))
+                let num: f64 = str::parse(&string).unwrap();
+                Ok(self.register_single(num.into()))
             } else {
                 return Err(ProgramErrorKind::ParsingError(utils::display_bytes(bytes)));
             }
@@ -244,7 +264,6 @@ impl VM {
     // }
 
     pub fn run(&mut self) {
-        let mut ran_main = false;
         while let Some(op) = self.next() {
             // println!(
             //     "{}/{} {:?}",
@@ -279,7 +298,9 @@ impl VM {
                 }
                 Response::Ok => continue,
                 Response::BlockReturn => unreachable!(),
+                Response::ExternReturn(_) => unreachable!(),
                 Response::IterationDone => break,
+                Response::FunctionReturn(_) => todo!(),
             }
             // if self.counter == self.program.instructions.len() {
             //     if !ran_main {
@@ -332,6 +353,12 @@ impl VM {
                     let _ = self.call_stack.pop();
                     // break;
                 }
+                Response::ExternReturn(_) => unreachable!(),
+                Response::FunctionReturn(Some(obj)) => {
+                    let obj = self.register_single(obj);
+                    self.obj_stack.push(obj)
+                }
+                Response::FunctionReturn(None) => continue,
             }
         }
     }
@@ -382,48 +409,6 @@ impl VM {
     #[inline]
     pub fn goto(&mut self, counter: usize) {
         self.counter = counter
-    }
-
-    pub fn handle_bin_op(&mut self, kind: BinOpKind) -> Response {
-        let pair = {
-            match self.obj_stack.pop_n(2) {
-                Ok(ts) => ts,
-                Err(_) => return Response::Error(ProgramErrorKind::StackError(2)),
-            }
-        };
-        let lhs = pair[0].data;
-        let rhs = pair[1].data;
-
-        let result = match kind {
-            BinOpKind::Add => binops::add(lhs, rhs),
-            BinOpKind::Sub => binops::sub(lhs, rhs),
-            BinOpKind::Mul => binops::mul(lhs, rhs),
-            BinOpKind::Div => binops::div(lhs, rhs),
-            BinOpKind::Mod => binops::modulus(lhs, rhs),
-            BinOpKind::Eq => binops::eq(lhs, rhs),
-            BinOpKind::LessEq => binops::lesseq(lhs, rhs),
-            BinOpKind::GreatEq => binops::greateq(lhs, rhs),
-            BinOpKind::Lesser => binops::lesser(lhs, rhs),
-            BinOpKind::Greater => binops::greater(lhs, rhs),
-            BinOpKind::And => binops::and(lhs, rhs),
-            BinOpKind::Or => binops::or(lhs, rhs),
-            BinOpKind::Power => binops::pow(lhs, rhs),
-            BinOpKind::Root => binops::root(lhs, rhs),
-            BinOpKind::BitAnd => todo!(),
-            BinOpKind::BitOr => todo!(),
-            BinOpKind::Xor => todo!(),
-            BinOpKind::BitShLeft => todo!(),
-            BinOpKind::BitShRight => todo!(),
-        };
-
-        match result {
-            Ok(value) => {
-                let value = self.register_single(value);
-                self.obj_stack.push(value);
-                Response::Ok
-            }
-            Err(e) => Response::Error(e),
-        }
     }
 
     pub fn error(&mut self, e: ProgramErrorKind) -> ProgramError {

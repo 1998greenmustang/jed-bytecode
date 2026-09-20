@@ -1,8 +1,7 @@
 use std::fmt::Display;
 
 use crate::{
-    binops::BinOpKind,
-    object::{ObjectData, ObjectKind},
+    object::ObjectKind,
     span::Span,
     utils::{self, display_bytes},
 };
@@ -10,13 +9,12 @@ use crate::{
 #[derive(Debug, Clone)]
 pub enum ProgramErrorKind {
     StackError(usize),
-    BinopError(BinOpKind, ObjectData, ObjectData),
     FunctionExists(&'static [u8]),
     VariableExists(&'static [u8]),
     TempPush,
     TypeError(ObjectKind, ObjectKind), // wanted, given
     ParsingError(String),
-    Overflow(BinOpKind, isize, isize),
+    Overflow(isize, isize),
     IntegerToUnsigned,
     ListIndexError(usize, usize), // index, length
     ConstantExists(&'static [u8]),
@@ -33,10 +31,6 @@ impl Display for ProgramErrorKind {
                 f,
                 "expected {n} object{} on the stack",
                 if n > &1 { "s" } else { "" }
-            ),
-            ProgramErrorKind::BinopError(kind, left, right) => write!(
-                f,
-                "{kind} not implemented for \n   left: {left:?}\n   right: {right:?}"
             ),
             ProgramErrorKind::FunctionExists(items) => write!(
                 f,
@@ -55,9 +49,9 @@ impl Display for ProgramErrorKind {
             ProgramErrorKind::ParsingError(string) => {
                 write!(f, "could not parse as literal \n >>>\t{string}\t<<<")
             }
-            ProgramErrorKind::Overflow(kind, left, right) => write!(
+            ProgramErrorKind::Overflow(left, right) => write!(
                 f,
-                "{kind} attempt with overflow \n   left: {left:?}\n   right: {right:?}"
+                "attempt with overflow \n   left: {left:?}\n   right: {right:?}"
             ),
             ProgramErrorKind::IntegerToUnsigned => {
                 write!(f, "attempt to use an integer as unsigned")

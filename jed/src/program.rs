@@ -1,17 +1,15 @@
 use std::{
     collections::{BTreeMap, HashMap},
     fs::File,
-    io::{self, BufReader, Read, Write},
+    io::{self},
     rc::Rc,
-    str::CharIndices,
 };
 
 use jed_macros::match_ops;
 
 use crate::{
-    MAGIC_NUMBER,
-    error::ProgramErrorKind,
     memory::{Dropless, list::List, peekableiterator::PeekableIterator},
+    modules,
     object::Object,
     operation::{Block, Operation},
     utils,
@@ -28,6 +26,7 @@ pub struct Program {
     pub saved_strings: BTreeMap<String, &'static [u8]>,
     pub instructions: Block,
     pub funcs: BTreeMap<&'static [u8], Operation>,
+    pub constructors: BTreeMap<&'static [u8], Operation>,
     pub memos: MemoTable,
     pub blocks: Vec<Block>,
 }
@@ -39,13 +38,20 @@ impl Program {
             saved_strings: BTreeMap::new(),
             instructions: Default::default(),
             funcs: BTreeMap::new(),
+            constructors: BTreeMap::new(),
             blocks: Vec::new(),
             memos: HashMap::new(),
         };
         // register keywords/stuff that not be added later
         // probably should be a macro but (:
         program.register("main".to_owned());
-
+        for func in modules::jed::FUNCTIONS {
+            let Operation::ExternFunc(name, _, _) = func else {
+                unreachable!()
+            };
+            let name: &'static [u8] = program.register_bytes(name);
+            program.funcs.insert(name, func.clone());
+        }
         return program;
     }
 
@@ -93,7 +99,7 @@ impl Program {
         self.memos.insert(key, result);
     }
 
-    pub fn to_file(&self, file: &mut File) -> io::Result<()> {
+    pub fn to_file(&self, _file: &mut File) -> io::Result<()> {
         todo!()
     }
 
@@ -110,7 +116,7 @@ impl Program {
     ///  ...
     /// ]
     /// Spans will be added later for error reporting
-    pub fn from_file(file: &mut File) -> io::Result<Self> {
+    pub fn from_file(_file: &mut File) -> io::Result<Self> {
         todo!()
     }
 
@@ -174,10 +180,8 @@ impl Program {
                     IterCurrent,
                     Debug
                 ]},
-                // single custom type arg
-                {[BinOp, CallBuiltIn, UnaryOp], Self::parse_token(text).unwrap().into()},
                 // bytes
-                {[PushLit, PushName, ReturnIf, StoreConst, StoreName, ReturnIfConst, Import],
+                {[PushLit, PushName, ReturnIf, StoreConst, StoreName, ReturnIfConst, Import, SetAttribute, GetAttribute, CreateObject],
                     self.register(Self::parse_token(text).unwrap().into())},
                 // option<usize>
                 {[CreateList, ListAlloc, ListSet, ListGet],
@@ -221,6 +225,22 @@ impl Program {
                         _ => panic!("start blocks with {{ plz")
                     }
                 }},
+                {Object, {
+                    let saved_name = self.register(Self::parse_token(text).unwrap());
+                    let arity = Self::parse_token(text).unwrap()
+                        .parse::<usize>()
+                        .expect("arity is not a number or something");
+                    let idx = self.instructions.len();
+                    match Self::parse_token(text) {
+                        Some(bracket) if bracket == "{" => {
+                            let b = self.parse_block(text);
+                            let op = Operation::Object(saved_name, arity, b);
+                            self.constructors.insert(saved_name, op.clone());
+                            op
+                        }
+                        _ => panic!("start blocks with {{ plz")
+                    }
+                }}
                 {DoForIn, {
                     let arg = self.register(Self::parse_token(text).unwrap());
                     match Self::parse_token(text) {
@@ -269,21 +289,5 @@ impl Program {
     //         Some(address) => Ok(address),
     //         None => Err(ProgramErrorKind::DoneAddress),
     //     }
-    // }
-
-    // pub fn import_module(&mut self, other: &mut Program) {
-    //     // update: vm.program.instructions, vm.program.funcs, vm.program.string_arena, vm.program.saved_strings
-    //     let length_of_other = other.instructions.len();
-    //     self.instructions.append(&mut other.instructions);
-
-    //     for (_name, tpl) in self.funcs.iter_mut() {
-    //         tpl.0 += length_of_other;
-    //     }
-    //     self.funcs.append(&mut other.funcs);
-
-    //     for (string, _) in other.saved_strings.clone() {
-    //         other.register(string);
-    //     }
-    //     drop(other);
     // }
 }

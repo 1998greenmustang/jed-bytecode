@@ -7,7 +7,7 @@ use std::{
 
 use crate::error::ProgramErrorKind;
 
-#[derive(Debug, PartialEq, PartialOrd, Ord, Eq, Hash)]
+#[derive(Debug, PartialEq, PartialOrd, Ord, Eq, Hash, Clone)]
 pub struct List<T> {
     ptr: NonNull<T>,
     cap: usize,
@@ -162,6 +162,7 @@ impl<T> List<T> {
                 ptr: me.ptr.as_ptr() as *const T,
                 end,
                 _marker: PhantomData,
+                current: 0,
             }
         }
     }
@@ -254,7 +255,7 @@ impl<T> Drop for List<T> {
         //     "called from line: {}; {}",
         //     caller_line_number, caller_location
         // );
-        println!("\n\tDROP !{:?} {} {}\n", self.ptr, self.cap, self.len);
+        // println!("\n\tDROP !{:?} {} {}\n", self.ptr, self.cap, self.len);
         // println!("maybere");
         if self.cap != 0 {
             self.len = 0;
@@ -301,10 +302,18 @@ impl<'a, T> DoubleEndedIterator for ListIterMut<'a, T> {
     }
 }
 
+#[derive(Clone)]
 pub struct ListIter<T: 'static> {
     ptr: *const T,
     end: *const T,
-    _marker: PhantomData<&'static T>,
+    pub current: usize,
+    _marker: PhantomData<T>,
+}
+
+impl<T> ListIter<T> {
+    pub fn current(&self) -> usize {
+        self.current
+    }
 }
 
 impl<T: std::fmt::Debug> Iterator for ListIter<T> {
@@ -314,6 +323,7 @@ impl<T: std::fmt::Debug> Iterator for ListIter<T> {
         if self.ptr != self.end {
             let old = self.ptr;
             self.ptr = unsafe { old.add(1) };
+            self.current += 1;
             unsafe { old.as_ref() }
         } else {
             None

@@ -5,9 +5,9 @@ use crate::{
 };
 use std::{
     cell::RefCell,
+    collections::HashMap,
     fmt::{Debug, Display},
     rc::Rc,
-    u8,
 };
 
 pub type MutableObject = &'static mut Object;
@@ -27,13 +27,14 @@ pub enum ObjectKind {
     Iterator,
     BigInteger,
     UnsignedInt,
+    Data,
 }
 
 impl From<ObjectData> for ObjectKind {
     fn from(value: ObjectData) -> Self {
         match value {
             ObjectData::Integer(_) => ObjectKind::Integer,
-            ObjectData::Float(_, _) => ObjectKind::Float,
+            ObjectData::Float(_) => ObjectKind::Float,
             ObjectData::UnsignedInt(_) => ObjectKind::UnsignedInt,
             ObjectData::String(_) => ObjectKind::String,
             ObjectData::Bool(_) => ObjectKind::Bool,
@@ -43,6 +44,7 @@ impl From<ObjectData> for ObjectKind {
             ObjectData::Iterator(_) => ObjectKind::Iterator,
             // ObjectData::BigInteger(integer) => ObjectKind::BigInteger,
             ObjectData::Nil => ObjectKind::Nil,
+            ObjectData::Data(_) => ObjectKind::Data,
         }
     }
 }
@@ -51,20 +53,23 @@ impl From<ObjectData> for ObjectKind {
 pub struct Object {
     pub kind: ObjectKind,
     pub data: ObjectData,
+    // pub attributes: *mut HashMap<&'static [u8], RegObject>,
 }
 
 #[derive(Hash, PartialEq, Eq, Copy, Clone, PartialOrd, Ord)]
 pub enum ObjectData {
     Integer(isize),
-    Float(i32, u32),
+    Float(*mut f64),
     UnsignedInt(usize),
     String(&'static [u8]),
     Bool(bool),
     Func(&'static [u8]),
     List(*mut Rc<RefCell<List<RegObject>>>),
     Pointer(*mut RegObject),
-    Iterator(*mut Rc<RefCell<ListIter<RegObject>>>), // start, next
+    Iterator(*mut Rc<RefCell<ListIter<RegObject>>>),
     // BigInteger(Integer),
+    // TODO generator prolly just use the Iterator data
+    Data(*mut HashMap<&'static [u8], RegObject>),
     Nil,
 }
 
@@ -78,7 +83,7 @@ impl Debug for ObjectData {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             ObjectData::Integer(i) => write!(f, "int ({i})"),
-            ObjectData::Float(i, p) => write!(f, "float ({i}.{p})"),
+            ObjectData::Float(ft) => write!(f, "float ({})", unsafe { **ft }),
             ObjectData::UnsignedInt(u) => write!(f, "uint ({u})"),
             ObjectData::String(items) => {
                 write!(f, "string (\"{}\")", utils::display_bytes(items))
@@ -91,6 +96,7 @@ impl Debug for ObjectData {
             ObjectData::Iterator(iter) => {
                 write!(f, "iterate (@{:?})", iter)
             } // ObjectData::BigInteger(i) => write!(f, "bigint ({i})"),
+            ObjectData::Data(_) => todo!(),
         }
     }
 }
@@ -99,16 +105,17 @@ impl Display for ObjectData {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             ObjectData::Integer(i) => write!(f, "{i}"),
-            ObjectData::Float(i, p) => write!(f, "{i}.{p}"),
+            ObjectData::Float(ft) => write!(f, "{}", unsafe { **ft }),
             ObjectData::String(s) => write!(f, "{}", utils::display_bytes(s)),
             ObjectData::Bool(b) => write!(f, "{b}"),
             ObjectData::Func(n) => write!(f, "{}", utils::display_bytes(n)),
             ObjectData::Pointer(pr) => write!(f, "{pr:p}"),
             ObjectData::Nil => write!(f, "Nil"),
-            ObjectData::UnsignedInt(_) => todo!(),
+            ObjectData::UnsignedInt(u) => write!(f, "{u}"),
             ObjectData::List(list) => write!(f, "{}", unsafe { (**list).borrow() }),
             ObjectData::Iterator(iter) => write!(f, "<iterator (@{iter:?})>"),
             // ObjectData::BigInteger(i) => write!(f, "{i}"),
+            ObjectData::Data(data) => write!(f, "{:?}", unsafe { (**data).clone() }),
         }
     }
 }
@@ -127,52 +134,42 @@ impl Display for ObjectKind {
             ObjectKind::Iterator => write!(f, "Iterator"),
             ObjectKind::BigInteger => write!(f, "BigInteger"),
             ObjectKind::UnsignedInt => todo!(),
+            ObjectKind::Data => todo!(),
         }
     }
 }
 
 impl Object {
-    pub fn nil() -> Self {
+    #[inline]
+    pub fn new(data: ObjectData) -> Self {
         Self {
-            kind: ObjectKind::Nil,
-            data: ObjectData::Nil,
+            kind: data.into(),
+            data,
         }
+    }
+    pub fn nil() -> Self {
+        Self::new(ObjectData::Nil)
     }
     pub fn as_tuple(&self) -> (ObjectKind, ObjectData) {
         return (self.kind, self.data);
-    }
-    pub fn as_ptr_mut(&mut self) -> *mut Object {
-        &mut *self as *mut Object
-    }
-    pub fn as_ptr(&self) -> *const Object {
-        &*self as *const Object
     }
 }
 
 impl From<bool> for Object {
     fn from(value: bool) -> Self {
-        Object {
-            kind: ObjectKind::Bool,
-            data: ObjectData::Bool(value),
-        }
+        Self::new(ObjectData::Bool(value))
     }
 }
 
 impl From<isize> for Object {
     fn from(value: isize) -> Self {
-        Object {
-            kind: ObjectKind::Integer,
-            data: ObjectData::Integer(value),
-        }
+        Self::new(ObjectData::Integer(value))
     }
 }
 
-impl From<(i32, u32)> for Object {
-    fn from(value: (i32, u32)) -> Self {
-        Object {
-            kind: ObjectKind::Float,
-            data: ObjectData::Float(value.0, value.1),
-        }
+impl From<f64> for Object {
+    fn from(value: f64) -> Self {
+        Self::new(ObjectData::Float(Box::into_raw(Box::new(value))))
     }
 }
 
