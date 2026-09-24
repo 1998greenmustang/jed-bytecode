@@ -1,10 +1,10 @@
-use std::{cell::RefCell, collections::HashMap, fs::File, io, rc::Rc, time::Instant};
+use std::{cell::RefCell, collections::HashMap, fs::File, io, rc::Rc};
 
 use crate::{
     error::{ProgramError, ProgramErrorKind},
     frame::{Frame, FrameKind},
     memory::{self, list::List, stack::Stack},
-    object::{MutableObject, Object, ObjectData, ObjectKind, RegObject},
+    object::{MutableObject, Object, ObjectData, RegObject},
     operation::{Operation, Response},
     program::Program,
     span::Span,
@@ -21,7 +21,6 @@ pub struct VM {
     pub memory: memory::Manual<Object>,
     pub current_span: Span,
     pub debug: bool,
-    start: Instant,
 }
 
 impl VM {
@@ -38,7 +37,6 @@ impl VM {
             memory: Default::default(),
             current_span: Span::empty(),
             debug,
-            start: Instant::now(),
         }
     }
 
@@ -82,7 +80,7 @@ impl VM {
                     _ => res,
                 }
             }
-            Some(Operation::Func(name, arity, block)) => {
+            Some(Operation::Func(_name, arity, block)) => {
                 // println!("{block}");
                 let args = {
                     match unsafe { self.obj_stack.last_n(arity) } {
@@ -265,7 +263,6 @@ impl VM {
     // }
 
     pub fn run(&mut self) {
-        self.start = Instant::now();
         while let Some(op) = self.next() {
             // println!(
             //     "{}/{} {:?}",
@@ -370,7 +367,6 @@ impl VM {
         self.obj_stack = Stack::new();
         self.call_stack = Stack::new();
         self.program.memos.clear();
-        println!("{:?}", Instant::now() - self.start);
         std::process::exit(code.unwrap_or_default());
     }
 
