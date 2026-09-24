@@ -25,8 +25,8 @@ pub struct Program {
     pub string_arena: Dropless,
     pub saved_strings: BTreeMap<String, &'static [u8]>,
     pub instructions: Block,
-    pub funcs: List<(&'static [u8], Operation)>,
-    pub constructors: List<(&'static [u8], Operation)>,
+    pub funcs: BTreeMap<&'static [u8], Operation>,
+    pub constructors: BTreeMap<&'static [u8], Operation>,
     pub memos: MemoTable,
     pub blocks: Vec<Block>,
 }
