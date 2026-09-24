@@ -1,3 +1,5 @@
+import io
+
 func main 0 {
 	push_lit 1000000
 	store_name n
@@ -7,10 +9,8 @@ func main 0 {
 	push_lit false
 	push_name n
 	push_lit 1
-	bin_op -
-	do_for {
-		push_lit true
-	}
+	call jedop_sub
+	push_many_lits true
 	create_list
 
 	store_name prime
@@ -20,9 +20,9 @@ func main 0 {
 	push_lit 2
 	
 	push_name n
-	call_built_in sqrt
+	call jed_sqrt
 	push_lit 1
-	bin_op +
+	call jedop_add
 	
 	push_lit 1
 
@@ -35,11 +35,11 @@ func main 0 {
 		do_if {
 			push_temp
 			push_temp
-			bin_op *
+			call jedop_mul
 
 			push_name n
 			push_lit 1
-			bin_op +
+			call jedop_add
 
 			push_temp
 			range_loop {
@@ -53,14 +53,14 @@ func main 0 {
 	}
 
 	push_name prime
-	get_iter
-	store_name iter
-	push_name iter
+	create_iter
+	store_name it
+	push_name it
 	iterate {
 		do_if {
-			push_name iter
+			push_name it
 			iter_current
-			call_built_in println
+			call io:println
 		}
 	}
 }

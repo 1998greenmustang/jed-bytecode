@@ -1,10 +1,4 @@
-use std::{
-    cell::RefCell,
-    collections::{BTreeMap, HashMap},
-    fs::File,
-    io,
-    rc::Rc,
-};
+use std::{cell::RefCell, collections::HashMap, fs::File, io, rc::Rc, time::Instant};
 
 use crate::{
     error::{ProgramError, ProgramErrorKind},
@@ -19,7 +13,7 @@ use crate::{
 
 pub struct VM {
     pub program: Program,
-    pub consts: HashMap<&'static [u8], RegObject>,
+    pub consts: Rc<RefCell<List<(&'static [u8], RegObject)>>>,
     pub counter: usize,
     pub call_stack: Stack<Frame>,
     pub obj_stack: Stack<RegObject>,
@@ -27,6 +21,7 @@ pub struct VM {
     pub memory: memory::Manual<Object>,
     pub current_span: Span,
     pub debug: bool,
+    start: Instant,
 }
 
 impl VM {
@@ -37,12 +32,13 @@ impl VM {
             call_stack,
             counter: 0,
             program,
-            consts: HashMap::new(),
+            consts: Rc::new(RefCell::new(List::new())),
             obj_stack: Stack::new(),
             temp: None,
             memory: Default::default(),
             current_span: Span::empty(),
             debug,
+            start: Instant::now(),
         }
     }
 
@@ -100,36 +96,37 @@ impl VM {
                 } else {
                     &[]
                 };
-                match self.program.get_memo((name, args)).cloned() {
-                    Some(value) => {
-                        // println!("YES DUDE {:?}", args);
-                        match self.obj_stack.pop_n(arity) {
-                            Ok(ts) => ts,
-                            Err(_) => return Response::Error(ProgramErrorKind::StackError(arity)),
-                        };
-                        let value = self.register_single(value);
-                        self.obj_stack.push(value);
-                        Response::Ok
-                    }
-                    None => {
-                        self.call_stack
-                            .push(Frame::new(self.counter, FrameKind::Call));
-                        let current_frame = match self.call_stack.last_mut() {
-                            Ok(ts) => ts,
-                            Err(e) => return Response::Error(e),
-                        };
-                        let args = if args.len() > 0 {
-                            self.program.register_arguments(args)
-                        } else {
-                            args
-                        };
-                        current_frame.memo_key = (name, args);
-                        self.run_block(&block.clone());
-                        let frame = self.call_stack.pop().unwrap();
-                        self.goto(frame.return_address);
-                        Response::Ok
-                    }
-                }
+                // match self.program.get_memo((name, args)).cloned() {
+                //     Some(value) => {
+                //         // println!("YES DUDE {:?}", args);
+                //         match self.obj_stack.pop_n(arity) {
+                //             Ok(ts) => ts,
+                //             Err(_) => return Response::Error(ProgramErrorKind::StackError(arity)),
+                //         };
+                //         let value = self.register_single(value);
+                //         self.obj_stack.push(value);
+                //         Response::Ok
+                //     }
+                //     None => {
+                self.call_stack
+                    .push(Frame::new(self.counter, FrameKind::Call));
+                let current_frame = match self.call_stack.last_mut() {
+                    Ok(ts) => ts,
+                    Err(e) => return Response::Error(e),
+                };
+                let args = if args.len() > 0 {
+                    self.program.register_arguments(args)
+                } else {
+                    args
+                };
+                // current_frame.memo_key = (name, args);
+                self.run_block(&block.clone());
+                let frame = self.call_stack.pop().unwrap();
+                self.goto(frame.return_address);
+                Response::Ok
+                //     }
+                // }
+                // Response::Ok
             }
             _ => Response::Error(ProgramErrorKind::FunctionExists(name)),
         }
@@ -242,11 +239,15 @@ impl VM {
 
     pub fn store_const(&mut self, name: &'static [u8], obj: Object) {
         let obj: RegObject = self.register_single(obj);
-        self.consts.insert(name, obj);
+        (*self.consts).borrow_mut().push((name, obj));
     }
 
     pub fn get_const(&self, name: &'static [u8]) -> Option<RegObject> {
-        self.consts.get(name).map(|v| *v)
+        (*self.consts)
+            .borrow()
+            .iter()
+            .find(|tpl| tpl.0 == name)
+            .map(|tpl| tpl.1)
     }
 
     pub fn from_string(text: String, debug: bool) -> Self {
@@ -264,6 +265,7 @@ impl VM {
     // }
 
     pub fn run(&mut self) {
+        self.start = Instant::now();
         while let Some(op) = self.next() {
             // println!(
             //     "{}/{} {:?}",
@@ -291,10 +293,10 @@ impl VM {
             let res = op.call(self);
 
             match res {
-                Response::Exit(code) => std::process::exit(code),
+                Response::Exit(code) => self.exit(Some(code)),
                 Response::Error(err) => {
                     println!("\nruntime failure:\n{}", self.error(err));
-                    std::process::exit(1);
+                    self.exit(Some(1));
                 }
                 Response::Ok => continue,
                 Response::BlockReturn => unreachable!(),
@@ -368,6 +370,7 @@ impl VM {
         self.obj_stack = Stack::new();
         self.call_stack = Stack::new();
         self.program.memos.clear();
+        println!("{:?}", Instant::now() - self.start);
         std::process::exit(code.unwrap_or_default());
     }
 
@@ -418,10 +421,10 @@ impl VM {
                 match self.call_stack.last().cloned() {
                     Ok(frame) => println!(
                         "current variables: {:?}",
-                        frame
-                            .locals
-                            .into_keys()
-                            .map(|x| utils::display_bytes(x))
+                        (*frame.locals)
+                            .borrow()
+                            .iter()
+                            .map(|tpl| utils::display_bytes(tpl.0))
                             .collect::<Vec<String>>()
                     ),
                     Err(_) => todo!(),

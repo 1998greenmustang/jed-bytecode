@@ -25,8 +25,8 @@ pub struct Program {
     pub string_arena: Dropless,
     pub saved_strings: BTreeMap<String, &'static [u8]>,
     pub instructions: Block,
-    pub funcs: BTreeMap<&'static [u8], Operation>,
-    pub constructors: BTreeMap<&'static [u8], Operation>,
+    pub funcs: List<(&'static [u8], Operation)>,
+    pub constructors: List<(&'static [u8], Operation)>,
     pub memos: MemoTable,
     pub blocks: Vec<Block>,
 }
@@ -192,21 +192,22 @@ impl Program {
                             "".to_string()
                         }
                     }).ok()},
+                // bytes, option<usize>
+                {PushManyLits, {
+                    let lit = self.register(Self::parse_token(text).unwrap().into());
+                    let us: Option<usize> = utils::string_to_t(match Self::parse_token(text) {
+                        Some(v) if v.chars().all(|c| c.is_numeric()) => v,
+                        _ => {
+                            text.undo();
+                            "".to_string()
+                        }
+                    }).ok();
+                    Operation::PushManyLits(lit, us)
+                }},
                 {Call, {
-                    let arg = Self::parse_token(text).unwrap();
-                    let split: Vec<&str> = arg.split(' ').filter(|x| x != &"").collect();
-                    match split.len() {
-                        2 => unsafe {
-                            let modname = self.register(split.get_unchecked(0).to_string());
-                            let funcname = self.register(split.get_unchecked(1).to_string());
-                            Operation::Call(Some(modname), Some(funcname))
-                        }
-                        1 => unsafe {
-                            let funcname = self.register(split.get_unchecked(0).to_string());
-                            Operation::Call(None, Some(funcname))
-                        }
-                        0 => Operation::Call(None, None),
-                        _ => panic!()
+                    match Self::parse_token(text) {
+                        Some(arg) => Operation::Call(Some(self.register(arg.to_string()))),
+                        _ => Operation::Call(None)
                     }
                 }}
                 {Func, {

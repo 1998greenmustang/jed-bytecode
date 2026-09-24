@@ -1,6 +1,6 @@
-use std::collections::BTreeMap;
+use std::{cell::RefCell, collections::BTreeMap, rc::Rc};
 
-use crate::{object::Object, program::MemoKey};
+use crate::{memory::list::List, object::Object, program::MemoKey};
 
 #[derive(PartialEq, Eq, Debug, Clone)]
 pub enum FrameKind {
@@ -17,7 +17,7 @@ pub enum FrameKind {
 #[derive(Debug, Clone)]
 pub struct Frame {
     // String -> Literal
-    pub locals: BTreeMap<&'static [u8], &'static Object>,
+    pub locals: Rc<RefCell<List<(&'static [u8], &'static Object)>>>,
     pub return_address: usize,
     pub memo_key: MemoKey,
     pub kind: FrameKind,
@@ -27,7 +27,7 @@ impl Frame {
     pub fn new(return_address: usize, kind: FrameKind) -> Self {
         Frame {
             memo_key: (&[], &[]),
-            locals: BTreeMap::new(),
+            locals: Rc::new(RefCell::new(List::new())),
             return_address,
             kind,
         }
@@ -37,11 +37,15 @@ impl Frame {
         // if self.locals.contains_key(name) {
         //     panic!("{} has already been declared");
         // }
-        self.locals.insert(name, obj);
+        (*self.locals).borrow_mut().push((name, obj));
     }
 
     pub fn get_local(&self, name: &'static [u8]) -> Option<&'static Object> {
-        self.locals.get(name).cloned()
+        (*self.locals)
+            .borrow()
+            .iter()
+            .find(|tpl| tpl.0 == name)
+            .map(|tpl| tpl.1)
     }
 
     pub fn copy_locals(&mut self, other: &Self) {
