@@ -1,12 +1,15 @@
 use crate::{
+    RustObject,
     error::ProgramErrorKind,
     memory::list::{List, ListIter},
     utils,
 };
 use std::{
+    any::Any,
     cell::RefCell,
     collections::HashMap,
     fmt::{Debug, Display},
+    mem::ManuallyDrop,
     rc::Rc,
 };
 
@@ -28,6 +31,7 @@ pub enum ObjectKind {
     BigInteger,
     UnsignedInt,
     Data,
+    RustObject,
 }
 
 impl From<ObjectData> for ObjectKind {
@@ -45,6 +49,7 @@ impl From<ObjectData> for ObjectKind {
             // ObjectData::BigInteger(integer) => ObjectKind::BigInteger,
             ObjectData::Nil => ObjectKind::Nil,
             ObjectData::Data(_) => ObjectKind::Data,
+            ObjectData::RustObject(_) => ObjectKind::RustObject,
         }
     }
 }
@@ -64,12 +69,13 @@ pub enum ObjectData {
     String(&'static [u8]),
     Bool(bool),
     Func(&'static [u8]),
-    List(*mut Rc<RefCell<List<RegObject>>>),
+    List(*mut ManuallyDrop<List<RegObject>>),
     Pointer(*mut RegObject),
-    Iterator(*mut Rc<RefCell<ListIter<RegObject>>>),
+    Iterator(*mut ListIter<RegObject>),
     // BigInteger(Integer),
     // TODO generator prolly just use the Iterator data
     Data(*mut HashMap<&'static [u8], RegObject>),
+    RustObject(*mut &'static dyn RustObject),
     Nil,
 }
 
@@ -97,6 +103,7 @@ impl Debug for ObjectData {
                 write!(f, "iterate (@{:?})", iter)
             } // ObjectData::BigInteger(i) => write!(f, "bigint ({i})"),
             ObjectData::Data(_) => todo!(),
+            ObjectData::RustObject(any) => unsafe { (**any).jed_debug(f) },
         }
     }
 }
@@ -112,10 +119,11 @@ impl Display for ObjectData {
             ObjectData::Pointer(pr) => write!(f, "{pr:p}"),
             ObjectData::Nil => write!(f, "Nil"),
             ObjectData::UnsignedInt(u) => write!(f, "{u}"),
-            ObjectData::List(list) => write!(f, "{}", unsafe { (**list).borrow() }),
+            ObjectData::List(list) => write!(f, "{}", unsafe { (***list).clone() }),
             ObjectData::Iterator(iter) => write!(f, "<iterator (@{iter:?})>"),
             // ObjectData::BigInteger(i) => write!(f, "{i}"),
             ObjectData::Data(data) => write!(f, "{:?}", unsafe { (**data).clone() }),
+            ObjectData::RustObject(any) => unsafe { (**any).jed_display(f) },
         }
     }
 }
@@ -133,8 +141,9 @@ impl Display for ObjectKind {
             ObjectKind::List => write!(f, "List"),
             ObjectKind::Iterator => write!(f, "Iterator"),
             ObjectKind::BigInteger => write!(f, "BigInteger"),
-            ObjectKind::UnsignedInt => todo!(),
-            ObjectKind::Data => todo!(),
+            ObjectKind::UnsignedInt => write!(f, "UnsignedInt"),
+            ObjectKind::Data => write!(f, "Data"),
+            ObjectKind::RustObject => write!(f, "RustObject"),
         }
     }
 }
@@ -170,6 +179,25 @@ impl From<isize> for Object {
 impl From<f64> for Object {
     fn from(value: f64) -> Self {
         Self::new(ObjectData::Float(Box::into_raw(Box::new(value))))
+    }
+}
+
+impl From<&'static dyn RustObject> for Object {
+    fn from(value: &'static dyn RustObject) -> Self {
+        let bx = Box::new(value);
+        Self::new(ObjectData::RustObject(Box::into_raw(bx)))
+    }
+}
+impl From<&'static mut dyn RustObject> for Object {
+    fn from(value: &'static mut dyn RustObject) -> Self {
+        let bx = Box::new(value as &'static dyn RustObject);
+        Self::new(ObjectData::RustObject(Box::into_raw(bx)))
+    }
+}
+
+impl From<&'static [u8]> for Object {
+    fn from(value: &'static [u8]) -> Self {
+        Self::new(ObjectData::String(value))
     }
 }
 

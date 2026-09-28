@@ -4,9 +4,13 @@ pub mod io;
 pub mod jed;
 pub mod math;
 pub mod socket;
+pub mod time;
 
-pub const MODULES: [(&[u8], &[Operation]); 2] =
-    [(math::MODULE, math::FUNCTIONS), (io::MODULE, io::FUNCTIONS)];
+pub const MODULES: [(&[u8], &[Operation]); 3] = [
+    (math::MODULE, math::FUNCTIONS),
+    (io::MODULE, io::FUNCTIONS),
+    (time::MODULE, time::FUNCTIONS),
+];
 
 // Module have to contain names that are Operation::Function
 

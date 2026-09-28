@@ -1,3 +1,5 @@
+use std::{any::Any, ops};
+
 use crate::{
     error::ProgramErrorKind,
     object::{Object, ObjectData},
@@ -31,6 +33,7 @@ pub fn add(operands: &[&Object]) -> Response {
     }
 }
 
+type RustSub = dyn ops::Sub<dyn Any, Output = dyn Any>;
 pub fn sub(operands: &[&Object]) -> Response {
     match (operands[0].data, operands[1].data) {
         (ObjectData::Integer(left), ObjectData::Integer(right)) => match left.checked_sub(right) {
@@ -41,6 +44,10 @@ pub fn sub(operands: &[&Object]) -> Response {
             let left = *left;
             let right = *right;
             Response::FunctionReturn(Some((left - right).into()))
+        },
+        (ObjectData::RustObject(left), ObjectData::RustObject(right)) => unsafe {
+            let res = (*left).jed_sub(*right);
+            Response::ExternReturn(res.map(|o| Box::leak(o).into()))
         },
         _ => Response::Error(ProgramErrorKind::TodoError),
     }

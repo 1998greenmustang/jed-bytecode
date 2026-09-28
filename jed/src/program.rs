@@ -2,12 +2,19 @@ use std::{
     collections::{BTreeMap, HashMap},
     fs::File,
     io::{self},
+    mem::ManuallyDrop,
+    ptr::slice_from_raw_parts_mut,
     rc::Rc,
 };
 
 use jed_macros::match_ops;
 
 use crate::{
+    error::{
+        self,
+        ProgramErrorKind::{ParsingError, TodoError},
+        Result,
+    },
     memory::{Dropless, list::List, peekableiterator::PeekableIterator},
     modules,
     object::Object,
@@ -27,6 +34,7 @@ pub struct Program {
     pub instructions: Block,
     pub funcs: BTreeMap<&'static [u8], Operation>,
     pub constructors: BTreeMap<&'static [u8], Operation>,
+    pub consts: ManuallyDrop<List<Object>>,
     pub memos: MemoTable,
     pub blocks: Vec<Block>,
 }
@@ -41,6 +49,7 @@ impl Program {
             constructors: BTreeMap::new(),
             blocks: Vec::new(),
             memos: HashMap::new(),
+            consts: ManuallyDrop::new(List::new()),
         };
         // register keywords/stuff that not be added later
         // probably should be a macro but (:
@@ -121,7 +130,7 @@ impl Program {
     }
 
     fn parse_token(text: &mut PeekableIterator<char>) -> Option<String> {
-        let _ = text.until(|c| !&[' ', '\t', '\n'].contains(c));
+        let _ = text.until(|c| !&[' ', '\t', '\n', ','].contains(c));
         let c = text.peek();
         match c {
             Some(c) if c == &'"' => {
@@ -135,12 +144,12 @@ impl Program {
                     panic!()
                 }
             }
-            Some(c) if ['{', '}'].contains(&c) => {
+            Some(c) if ['{', '}', ','].contains(&c) => {
                 let c = text.next()?;
                 return Some(c.to_string());
             }
             Some(_) => {
-                if let Some(u) = text.until_any(&[' ', '\t', '{', '}', '\n']) {
+                if let Some(u) = text.until_any(&[' ', '\t', '{', '}', '\n', ',']) {
                     return Some(u.iter().collect());
                 } else {
                     return None;
@@ -148,6 +157,21 @@ impl Program {
             }
             None => return None,
         }
+    }
+
+    fn parse_consts(&mut self, text: &mut PeekableIterator<char>) -> Operation {
+        // im in the block here
+        while let Some(literal) = Self::parse_token(text) {
+            if literal == "," {
+                continue;
+            }
+            if literal == "}" {
+                break;
+            }
+            let literal = self.register(literal);
+            let _ = self.parse_lit(literal); // TODO handle error
+        }
+        return Operation::Consts;
     }
 
     fn parse_block(&mut self, text: &mut PeekableIterator<char>) -> Block {
@@ -181,8 +205,17 @@ impl Program {
                     Debug
                 ]},
                 // bytes
-                {[PushLit, PushName, ReturnIf, StoreConst, StoreName, ReturnIfConst, Import, SetAttribute, GetAttribute, CreateObject],
+                {[PushName, ReturnIf, StoreConst, StoreName, Import, SetAttribute, GetAttribute, CreateObject],
                     self.register(Self::parse_token(text).unwrap().into())},
+                {[PushLit],
+                    utils::string_to_t(match Self::parse_token(text) {
+                        Some(v) if v.chars().all(|c| c.is_numeric()) => v,
+                        _ => {
+                            text.undo();
+                            "".to_string()
+                        }
+                    }).expect("") // TODO handle parser error :D
+                    },
                 // option<usize>
                 {[CreateList, ListAlloc, ListSet, ListGet],
                     utils::string_to_t(match Self::parse_token(text) {
@@ -192,9 +225,15 @@ impl Program {
                             "".to_string()
                         }
                     }).ok()},
-                // bytes, option<usize>
+                // usize, option<usize>
                 {PushManyLits, {
-                    let lit = self.register(Self::parse_token(text).unwrap().into());
+                    let lit: usize = utils::string_to_t(match Self::parse_token(text) {
+                        Some(v) if v.chars().all(|c| c.is_numeric()) => v,
+                        _ => {
+                            text.undo();
+                            "".to_string()
+                        }
+                    }).expect(""); // TODO handle parser error :D
                     let us: Option<usize> = utils::string_to_t(match Self::parse_token(text) {
                         Some(v) if v.chars().all(|c| c.is_numeric()) => v,
                         _ => {
@@ -259,7 +298,15 @@ impl Program {
                         }
                         _ => panic!("start blocks with {{ plz")
                     }
-                }
+                },
+                {Consts, {
+                    match Self::parse_token(text) {
+                        Some(bracket) if bracket == "{" => {
+                            self.parse_consts(text)
+                        }
+                        _ => panic!("start blocks with {{ plz")
+                    }
+                }}
             ));
             // buffer.push(c);
         }
@@ -285,6 +332,44 @@ impl Program {
         program
     }
 
+    pub fn parse_lit(&mut self, bytes: &'static [u8]) -> Result<()> {
+        let string = unsafe { String::from_utf8_unchecked(bytes.to_vec()) };
+        if string.starts_with('[') && string.ends_with(']') {
+            // let bytess = &string[1..string.len() - 1];
+            todo!("pushing many at a time")
+        } else if string.starts_with('"') && string.ends_with('"') {
+            let s = &string[1..string.len() - 1];
+            let sb = self.register(s.to_owned());
+            self.consts.push(sb.into());
+            Ok(())
+        } else if string == "true" {
+            self.consts.push(true.into());
+            Ok(())
+        } else if string == "false" {
+            self.consts.push(false.into());
+            Ok(())
+        } else if string == "Nil" {
+            self.consts.push(Object::nil());
+            Ok(())
+        } else if string.chars().all(|c| c.is_numeric()) {
+            let num: isize = match utils::string_to_t(string) {
+                Ok(v) => v,
+                Err(e) => return Err(e),
+            };
+            self.consts.push(num.into());
+            Ok(())
+        } else if utils::string_is_float_like(string.clone()) {
+            let num: f64 = str::parse(&string).unwrap();
+            self.consts.push(num.into());
+            Ok(())
+        } else {
+            return Err(ParsingError(utils::display_bytes(bytes)));
+        }
+    }
+
+    pub fn get_const(&self, idx: usize) -> Result<Object> {
+        self.consts.get(idx).ok_or(TodoError).copied()
+    }
     // pub fn get_done(&self, pc: &usize) -> Result<&usize, ProgramErrorKind> {
     //     match self.block_returns.get(pc) {
     //         Some(address) => Ok(address),

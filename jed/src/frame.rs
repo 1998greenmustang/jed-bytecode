@@ -43,8 +43,7 @@ impl Frame {
     pub fn get_local(&self, name: &'static [u8]) -> Option<&'static Object> {
         (*self.locals)
             .borrow()
-            .iter()
-            .find(|tpl| tpl.0 == name)
+            .find(|(items, object)| *items == name)
             .map(|tpl| tpl.1)
     }
 

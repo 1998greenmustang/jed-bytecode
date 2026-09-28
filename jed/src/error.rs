@@ -6,6 +6,8 @@ use crate::{
     utils::{self, display_bytes},
 };
 
+pub type Result<T> = std::result::Result<T, ProgramErrorKind>;
+
 #[derive(Debug, Clone)]
 pub enum ProgramErrorKind {
     StackError(usize),
@@ -22,6 +24,7 @@ pub enum ProgramErrorKind {
     IterPrevious,    // index, length
     TodoError,
     DoneAddress,
+    RustObjectBinOp,
 }
 
 impl Display for ProgramErrorKind {
@@ -72,6 +75,10 @@ impl Display for ProgramErrorKind {
                 write!(f, "there is an error here, but im not sure what it is")
             }
             ProgramErrorKind::DoneAddress => write!(f, "somehow there's no done address to go to"),
+            ProgramErrorKind::RustObjectBinOp => write!(
+                f,
+                "left and right types are mismatched, implement your own binary op"
+            ),
         }
     }
 }

@@ -12,6 +12,7 @@ pub struct List<T> {
     ptr: NonNull<T>,
     cap: usize,
     len: usize,
+    _marker: PhantomData<T>,
 }
 
 impl<T: std::fmt::Display> std::fmt::Display for List<T> {
@@ -38,6 +39,7 @@ impl<T> Default for List<T> {
             ptr: NonNull::dangling(),
             cap: Default::default(),
             len: Default::default(),
+            _marker: PhantomData,
         }
     }
 }
@@ -48,6 +50,7 @@ impl<T> List<T> {
             ptr: NonNull::dangling(),
             len: 0,
             cap: 0,
+            _marker: PhantomData,
         };
         this.grow();
         this
@@ -244,6 +247,31 @@ impl<T> List<T> {
             self.grow()
         }
     }
+
+    pub fn find(&self, mut predicate: impl FnMut(&T) -> bool) -> Option<&T> {
+        let mut ptr = self.ptr;
+        unsafe {
+            while ptr != self.ptr.add(self.len) {
+                if predicate(ptr.as_ref()) {
+                    return Some(ptr.as_ref());
+                }
+                ptr = ptr.add(1);
+            }
+        }
+        return None;
+    }
+    pub fn find_map<U>(&self, mut predicate: impl FnMut(&T) -> Option<U>) -> Option<U> {
+        let mut ptr = self.ptr;
+        unsafe {
+            while ptr != self.ptr.add(self.len) {
+                match predicate(ptr.as_ref()) {
+                    Some(yay) => return Some(yay),
+                    _ => ptr = ptr.add(1),
+                }
+            }
+        }
+        return None;
+    }
 }
 
 impl<T> Drop for List<T> {
@@ -302,7 +330,7 @@ impl<'a, T> DoubleEndedIterator for ListIterMut<'a, T> {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Copy)]
 pub struct ListIter<T: 'static> {
     ptr: *const T,
     end: *const T,

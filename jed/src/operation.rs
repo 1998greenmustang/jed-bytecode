@@ -1,12 +1,15 @@
-use std::{cell::RefCell, convert::TryInto, fmt::Display, rc::Rc};
+use std::{cell::RefCell, convert::TryInto, fmt::Display, mem::ManuallyDrop, rc::Rc};
 
 use jed_macros::{
     IndexFroms, IndexToSnakeCase, SnakeCaseDisplay, SnakeCaseExists, SnakeCaseToIndex,
 };
 
 use crate::{
-    error::ProgramErrorKind::{self},
-    frame::{Frame, FrameKind},
+    error::ProgramErrorKind::{self, TodoError, TypeError},
+    frame::{
+        Frame,
+        FrameKind::{self, DoIfBlock},
+    },
     memory::list::List,
     modules::MODULES,
     object::{MutableObject, Object, ObjectData, ObjectKind, RegObject},
@@ -26,8 +29,8 @@ pub enum Operation {
     #[jed(type: Option<&'static [u8]>, func: display_option_bytes)]
     #[jed(type: fn(&[&Object]) -> Response, func: (|_| "external function"))]
     Call(Option<&'static [u8]>),
-    PushLit(&'static [u8]),
-    PushManyLits(&'static [u8], Option<usize>),
+    PushLit(usize),
+    PushManyLits(usize, Option<usize>),
     PushName(&'static [u8]),
     PushTemp,
     Pop,
@@ -49,7 +52,6 @@ pub enum Operation {
     ListFill(usize, &'static [u8]),
     PushRange,
     RangeLoop(Block),
-    ReturnIfConst(&'static [u8]),
     GetPtr,
     ReadPtr,
     SetPtr,
@@ -68,6 +70,7 @@ pub enum Operation {
     CreateObject(&'static [u8]),
     GetAttribute(&'static [u8]),
     SetAttribute(&'static [u8]),
+    Consts, // essentially just a label, just here for macros
 }
 
 pub enum Response {
@@ -82,6 +85,7 @@ pub enum Response {
 
 impl Operation {
     pub fn call(&self, vm: &mut VM) -> Response {
+        // println!("{self}");
         match self {
             Operation::Call(_) => self.op_call(vm),
             Operation::PushLit(_) => self.op_push_lit(vm),
@@ -102,7 +106,6 @@ impl Operation {
             Operation::ListSet(_) => self.op_list_set(vm),
             Operation::ListAlloc(_) => self.op_list_alloc(vm),
             Operation::PushRange => self.op_push_range(vm),
-            Operation::ReturnIfConst(_) => self.op_return_if_const(vm),
             Operation::GetPtr => self.op_get_ptr(vm),
             Operation::ReadPtr => self.op_read_ptr(vm),
             Operation::SetPtr => self.op_set_ptr(vm),
@@ -121,6 +124,7 @@ impl Operation {
             Operation::CreateObject(_) => self.op_create_object(vm),
             Operation::SetAttribute(_) => self.op_set_attribute(vm),
             Operation::GetAttribute(_) => self.op_get_attribute(vm),
+            Operation::Consts => Response::Ok,
             _ => todo!("{}", self),
         }
     }
@@ -152,10 +156,10 @@ impl Operation {
     #[inline(never)]
     fn op_push_lit(&self, vm: &mut VM) -> Response {
         match self {
-            Operation::PushLit(literal) => match vm.parse_lit(literal) {
+            Operation::PushLit(idx) => match vm.program.get_const(*idx) {
                 Ok(obj) => {
+                    let obj = vm.register_single(obj);
                     vm.obj_stack.push(obj);
-                    vm.store_const(literal, *obj);
                     Response::Ok
                 }
                 Err(e) => Response::Error(e),
@@ -251,7 +255,7 @@ impl Operation {
         match self {
             Operation::StoreConst(name) => match { vm.obj_stack.pop() } {
                 Ok(t) => {
-                    vm.store_const(*name, *t);
+                    // vm.store_const(*name, *t);
                     return Response::Ok;
                 }
                 Err(_) => Response::Error(ProgramErrorKind::StackError(1)),
@@ -357,12 +361,12 @@ impl Operation {
                 vm.call_stack.push(new_frame);
                 match obj_ptr.as_tuple() {
                     (ObjectKind::List, ObjectData::List(list)) => unsafe {
-                        for _ in 0..(*list).borrow().len() {
+                        for _ in 0..(*list).len() {
                             vm.run_block(&Rc::clone(block));
                         }
                     },
                     (ObjectKind::Iterator, ObjectData::Iterator(iter)) => {
-                        while let Some(_obj) = (unsafe { (*iter).borrow_mut() }).next() {
+                        while let Some(_obj) = (unsafe { *iter }).next() {
                             vm.counter = pc;
                             vm.run_block(&Rc::clone(block));
                         }
@@ -398,9 +402,9 @@ impl Operation {
                     Ok(objs) => objs.iter().map(|o| list.push(*o)).collect::<()>(),
                     Err(e) => return Response::Error(e),
                 };
-                let obj = Object::new(ObjectData::List(Box::into_raw(Box::new(Rc::new(
-                    RefCell::new(list),
-                )))));
+                let obj = Object::new(ObjectData::List(Box::into_raw(Box::new(
+                    ManuallyDrop::new(list),
+                ))));
                 let obj: MutableObject = vm.register_single_mut(obj);
                 vm.obj_stack.push(obj);
 
@@ -418,7 +422,7 @@ impl Operation {
                     Ok(new_item) => match { vm.obj_stack.pop_mut() } {
                         Ok(&mut &Object { ref kind, data }) => {
                             if let ObjectData::List(list) = data {
-                                (*list).borrow_mut().push(&new_item);
+                                (*list).push(&new_item);
                                 return Response::Ok;
                             } else {
                                 return Response::Error(ProgramErrorKind::TypeError(
@@ -464,13 +468,13 @@ impl Operation {
                 match { vm.obj_stack.pop() } {
                     Ok(list_obj) => match (list_obj.kind, list_obj.data) {
                         (ObjectKind::List, ObjectData::List(list)) => unsafe {
-                            if let Some(obj) = (*list).borrow().get(idx) {
+                            if let Some(obj) = (*list).get(idx) {
                                 vm.obj_stack.push(obj);
                                 Response::Ok
                             } else {
                                 Response::Error(ProgramErrorKind::ListIndexError(
                                     idx,
-                                    (*list).borrow().len(),
+                                    (*list).len(),
                                 ))
                             }
                         },
@@ -517,13 +521,13 @@ impl Operation {
 
                         match (list_obj.kind, list_obj.data) {
                             (ObjectKind::List, ObjectData::List(list)) => {
-                                if idx < (*list).borrow().len() {
-                                    (*list).borrow_mut().insert(idx, &obj);
+                                if idx < (*list).len() {
+                                    (*list).insert(idx, &obj);
                                     Response::Ok
                                 } else {
                                     Response::Error(ProgramErrorKind::ListIndexError(
                                         idx,
-                                        (*list).borrow().len(),
+                                        (*list).len(),
                                     ))
                                 }
                             }
@@ -567,7 +571,7 @@ impl Operation {
                 match { vm.obj_stack.pop_mut() } {
                     Ok(&mut &Object { ref kind, mut data }) => {
                         if let ObjectData::List(list) = data {
-                            (*list).borrow_mut().alloc(num);
+                            (*list).alloc(num);
                             Response::Ok
                         } else {
                             Response::Error(ProgramErrorKind::TypeError(ObjectKind::List, *kind))
@@ -606,36 +610,6 @@ impl Operation {
                     }
                     _ => todo!(),
                 };
-            }
-            _ => unreachable!(),
-        }
-    }
-
-    #[inline(never)]
-    fn op_return_if_const(&self, vm: &mut VM) -> Response {
-        match self {
-            Operation::ReturnIfConst(name) => {
-                let b = {
-                    match { vm.obj_stack.pop() } {
-                        Ok(t) => t,
-                        Err(_) => return Response::Error(ProgramErrorKind::StackError(1)),
-                    }
-                };
-                assert_eq!(b.kind, ObjectKind::Bool, "Object is not a boolean");
-                match b.data {
-                    ObjectData::Bool(bol) => {
-                        if bol {
-                            if let Some(obj) = vm.get_const(name) {
-                                vm.obj_stack.push(obj);
-                                return Response::BlockReturn;
-                            } else {
-                                return Response::Error(ProgramErrorKind::VariableExists(name));
-                            }
-                        }
-                        Response::Ok
-                    }
-                    _ => Response::Error(ProgramErrorKind::TypeError(ObjectKind::Bool, b.kind)),
-                }
             }
             _ => unreachable!(),
         }
@@ -711,9 +685,7 @@ impl Operation {
             Operation::CreateIter => match { vm.obj_stack.pop() } {
                 Ok(list_obj) => match list_obj.data {
                     ObjectData::List(ls) => {
-                        let iter = Box::new(Rc::new(RefCell::new(
-                            unsafe { (*ls).clone() }.borrow().iter(),
-                        )));
+                        let iter = Box::new(unsafe { (*ls).clone() }.iter());
                         let iter_obj = Object::new(ObjectData::Iterator(Box::into_raw(iter)));
                         let iter_obj: RegObject = vm.register_single(iter_obj);
                         vm.obj_stack.push(iter_obj);
@@ -733,24 +705,28 @@ impl Operation {
     #[inline(never)]
     fn op_iter_current(&self, vm: &mut VM) -> Response {
         match self {
-            Operation::IterCurrent => match { vm.obj_stack.pop() } {
-                Ok(&Object {
-                    kind: _,
-                    data: ObjectData::Iterator(iter),
-                }) => {
-                    let obj = Object::new(ObjectData::UnsignedInt(
-                        unsafe { (*((*iter).as_ptr())).clone() }.current - 1,
-                    ));
+            Operation::IterCurrent => {
+                let data = vm
+                    .call_stack
+                    .last()
+                    .unwrap()
+                    .get_local(b"@iter")
+                    .map(|o: &'static Object| o.data);
+                // let locals = vm.call_stack.last().unwrap().locals.borrow().iter();
+                match data {
+                    Some(data) if let ObjectData::Iterator(iter) = data => {
+                        let obj = Object::new(ObjectData::UnsignedInt(
+                            unsafe { (*iter).clone() }.current - 1,
+                        ));
+                        let obj: RegObject = vm.register_single(obj);
+                        vm.obj_stack.push(obj);
 
-                    let obj: RegObject = vm.register_single(obj);
-                    vm.obj_stack.push(obj);
-                    Response::Ok
+                        Response::Ok
+                    }
+                    Some(data) => Response::Error(TypeError(ObjectKind::Iterator, data.into())),
+                    None => todo!(),
                 }
-                Ok(&Object { kind, .. }) => {
-                    Response::Error(ProgramErrorKind::TypeError(ObjectKind::Iterator, kind))
-                }
-                Err(_) => Response::Error(ProgramErrorKind::StackError(1)),
-            },
+            }
             _ => unreachable!(),
         }
     }
@@ -759,11 +735,17 @@ impl Operation {
     fn op_iterate(&self, vm: &mut VM) -> Response {
         match self {
             Operation::Iterate(block) => match { vm.obj_stack.pop_mut() } {
-                Ok(&mut Object {
-                    data: ObjectData::Iterator(iter),
-                    ..
-                }) => {
-                    while let Some(obj) = (unsafe { (**iter).borrow_mut() }).next() {
+                Ok(&mut object)
+                    if let Object {
+                        data: ObjectData::Iterator(iter),
+                        ..
+                    } = object =>
+                {
+                    vm.call_stack
+                        .last_mut()
+                        .unwrap()
+                        .add_local(b"@iter", object);
+                    while let Some(obj) = (unsafe { iter.as_mut_unchecked() }).next() {
                         vm.obj_stack.push(obj);
                         vm.run_block(block);
                     }
@@ -782,29 +764,15 @@ impl Operation {
     fn op_do_if(&self, vm: &mut VM) -> Response {
         match self {
             Operation::DoIf(block) => {
-                // 1. Early return for stack errors
                 let b = match vm.obj_stack.pop() {
                     Ok(v) => v,
                     Err(e) => return Response::Error(e),
                 };
 
-                // 2. Pattern match on data directly
                 match b.data {
                     ObjectData::Bool(bol) => {
                         if bol {
-                            // 3. Avoid cloning locals if the block doesn't shadow them,
-                            // or keep as-is if scope isolation is required.
-                            let mut new_frame = Frame::new(vm.counter, FrameKind::DoIfBlock);
-
-                            // 4. Use last() instead of nested match for cleaner flow
-                            if let Ok(frame) = vm.call_stack.last() {
-                                new_frame.copy_locals(frame);
-                                vm.call_stack.push(new_frame);
-                                // 5. Pass block by reference directly (Rc clone is O(1) but unnecessary here)
-                                vm.run_block(block);
-                            } else {
-                                unreachable!()
-                            }
+                            vm.run_block(block);
                         }
                         Response::Ok
                     }
@@ -933,7 +901,7 @@ impl Operation {
     #[inline(never)]
     fn op_push_many_lits(&self, vm: &mut VM) -> Response {
         match self {
-            Operation::PushManyLits(lit, maybe_n) => {
+            Operation::PushManyLits(idx, maybe_n) => {
                 let n = match maybe_n {
                     Some(n) => *n,
                     None => match vm.obj_stack.pop() {
@@ -944,11 +912,12 @@ impl Operation {
                         Err(e) => return Response::Error(e),
                     },
                 };
-                let lit = vm.parse_lit(lit);
+                let lit = vm.program.get_const(*idx);
                 match lit {
                     Ok(lit) => {
                         for _ in 0..n {
-                            vm.obj_stack.push(&lit);
+                            let obj = vm.register_single(lit);
+                            vm.obj_stack.push(obj);
                         }
                         Response::Ok
                     }

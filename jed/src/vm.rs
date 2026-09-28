@@ -1,4 +1,4 @@
-use std::{cell::RefCell, collections::HashMap, fs::File, io, rc::Rc};
+use std::{cell::RefCell, collections::HashMap, fs::File, io, mem::ManuallyDrop, rc::Rc};
 
 use crate::{
     error::{ProgramError, ProgramErrorKind},
@@ -13,7 +13,6 @@ use crate::{
 
 pub struct VM {
     pub program: Program,
-    pub consts: Rc<RefCell<List<(&'static [u8], RegObject)>>>,
     pub counter: usize,
     pub call_stack: Stack<Frame>,
     pub obj_stack: Stack<RegObject>,
@@ -31,7 +30,6 @@ impl VM {
             call_stack,
             counter: 0,
             program,
-            consts: Rc::new(RefCell::new(List::new())),
             obj_stack: Stack::new(),
             temp: None,
             memory: Default::default(),
@@ -130,40 +128,6 @@ impl VM {
         }
     }
 
-    pub fn parse_lit(&mut self, bytes: &'static [u8]) -> Result<RegObject, ProgramErrorKind> {
-        let get_const = self.get_const(bytes);
-        if let Some(lit) = get_const {
-            Ok(lit)
-        } else {
-            let string = unsafe { String::from_utf8_unchecked(bytes.to_vec()) };
-            if string.starts_with('[') && string.ends_with(']') {
-                // let bytess = &string[1..string.len() - 1];
-                todo!("pushing many at a time")
-            } else if string.starts_with('"') && string.ends_with('"') {
-                let s = &string[1..string.len() - 1];
-                let sb = self.program.register(s.to_owned());
-                Ok(self.register_single(Object::new(ObjectData::String(sb))))
-            } else if string == "true" {
-                Ok(self.register_single(Object::new(ObjectData::Bool(true))))
-            } else if string == "false" {
-                Ok(self.register_single(Object::new(ObjectData::Bool(false))))
-            } else if string == "Nil" {
-                Ok(self.register_single(Object::nil()))
-            } else if string.chars().all(|c| c.is_numeric()) {
-                let num: isize = match utils::string_to_t(string) {
-                    Ok(v) => v,
-                    Err(e) => return Err(e),
-                };
-                Ok(self.register_single(num.into()))
-            } else if utils::string_is_float_like(string.clone()) {
-                let num: f64 = str::parse(&string).unwrap();
-                Ok(self.register_single(num.into()))
-            } else {
-                return Err(ProgramErrorKind::ParsingError(utils::display_bytes(bytes)));
-            }
-        }
-    }
-
     pub fn register_single(&mut self, obj: Object) -> RegObject {
         let saved_bytes = self.memory.alloc(&obj);
         let saved_bytes: &'static mut Object = saved_bytes;
@@ -235,19 +199,6 @@ impl VM {
         return &[];
     }
 
-    pub fn store_const(&mut self, name: &'static [u8], obj: Object) {
-        let obj: RegObject = self.register_single(obj);
-        (*self.consts).borrow_mut().push((name, obj));
-    }
-
-    pub fn get_const(&self, name: &'static [u8]) -> Option<RegObject> {
-        (*self.consts)
-            .borrow()
-            .iter()
-            .find(|tpl| tpl.0 == name)
-            .map(|tpl| tpl.1)
-    }
-
     pub fn from_string(text: String, debug: bool) -> Self {
         let program = Program::from_string(text);
         Self::new(program, debug)
@@ -297,9 +248,19 @@ impl VM {
                 }
                 Response::Ok => continue,
                 Response::BlockReturn => unreachable!(),
-                Response::ExternReturn(_) => unreachable!(),
-                Response::IterationDone => break,
-                Response::FunctionReturn(_) => todo!(),
+                Response::ExternReturn(obj) => {
+                    obj.map(|o| {
+                        let o = self.register_single(o);
+                        self.obj_stack.push(o)
+                    });
+                }
+                Response::IterationDone => continue,
+                Response::FunctionReturn(obj) => {
+                    obj.map(|o| {
+                        let o = self.register_single(o);
+                        self.obj_stack.push(o)
+                    });
+                }
             }
             // if self.counter == self.program.instructions.len() {
             //     if !ran_main {
@@ -416,7 +377,8 @@ impl VM {
             ProgramErrorKind::VariableExists(_) => {
                 match self.call_stack.last().cloned() {
                     Ok(frame) => println!(
-                        "current variables: {:?}",
+                        "frame type: {:?}, current variables: {:?}",
+                        (frame.kind),
                         (*frame.locals)
                             .borrow()
                             .iter()
