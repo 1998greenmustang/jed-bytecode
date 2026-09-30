@@ -205,9 +205,9 @@ impl Program {
                     Debug
                 ]},
                 // bytes
-                {[PushName, ReturnIf, StoreConst, StoreName, Import, SetAttribute, GetAttribute, CreateObject],
+                {[Import, SetAttribute, GetAttribute, CreateObject],
                     self.register(Self::parse_token(text).unwrap().into())},
-                {[PushLit],
+                {[PushConst, Push, Store],
                     utils::string_to_t(match Self::parse_token(text) {
                         Some(v) if v.chars().all(|c| c.is_numeric()) => v,
                         _ => {
@@ -226,7 +226,7 @@ impl Program {
                         }
                     }).ok()},
                 // usize, option<usize>
-                {PushManyLits, {
+                {PushManyConst, {
                     let lit: usize = utils::string_to_t(match Self::parse_token(text) {
                         Some(v) if v.chars().all(|c| c.is_numeric()) => v,
                         _ => {
@@ -241,7 +241,7 @@ impl Program {
                             "".to_string()
                         }
                     }).ok();
-                    Operation::PushManyLits(lit, us)
+                    Operation::PushManyConst(lit, us)
                 }},
                 {Call, {
                     match Self::parse_token(text) {
@@ -282,7 +282,13 @@ impl Program {
                     }
                 }}
                 {DoForIn, {
-                    let arg = self.register(Self::parse_token(text).unwrap());
+                    let arg: usize = utils::string_to_t(match Self::parse_token(text) {
+                        Some(v) if v.chars().all(|c| c.is_numeric()) => v,
+                        _ => {
+                            text.undo();
+                            "".to_string()
+                        }
+                    }).expect(""); // TODO handle parser error :D
                     match Self::parse_token(text) {
                         Some(bracket) if bracket == "{" => {
                             let b = self.parse_block(text);

@@ -56,33 +56,33 @@ impl<T> Manual<T> {
         assert_ne!(layout.size(), 0);
         // let entries = layout.size() / Self::SIZE_OF_T;
         // Search through free memory
-        let mut free = self.free.borrow_mut();
+        // let mut free = self.free.borrow_mut();
 
-        // Prefered ==
-        if let Some(entry_idx) = free
-            .iter_mut()
-            .position(|x| x.size == layout.size())
-            .as_mut()
-        {
-            let entry = unsafe { free.get_unchecked(*entry_idx) };
-            let start = entry.start.clone().into_inner();
-            free.remove(*entry_idx);
-            self.update_chunks(start, layout.size() as isize);
-            return start;
-        }
+        // // Prefered ==
+        // if let Some(entry_idx) = free
+        //     .iter_mut()
+        //     .position(|x| x.size == layout.size())
+        //     .as_mut()
+        // {
+        //     let entry = unsafe { free.get_unchecked(*entry_idx) };
+        //     let start = entry.start.clone().into_inner();
+        //     free.remove(*entry_idx);
+        //     self.update_chunks(start, layout.size() as isize);
+        //     return start;
+        // }
 
-        // Then try out >
-        if let Some(entry_idx) = free
-            .iter_mut()
-            .position(|x| x.size > layout.size())
-            .as_mut()
-        {
-            let entry = unsafe { free.get_unchecked_mut(*entry_idx) };
-            let start = entry.start.clone().into_inner();
-            entry.size -= layout.size();
-            self.update_chunks(start, layout.size() as isize);
-            return start;
-        }
+        // // Then try out >
+        // if let Some(entry_idx) = free
+        //     .iter_mut()
+        //     .position(|x| x.size > layout.size())
+        //     .as_mut()
+        // {
+        //     let entry = unsafe { free.get_unchecked_mut(*entry_idx) };
+        //     let start = entry.start.clone().into_inner();
+        //     entry.size -= layout.size();
+        //     self.update_chunks(start, layout.size() as isize);
+        //     return start;
+        // }
 
         // allocate from `self.start` to `self.start + layout.size()`
         // return self.start; change self.start to `self.start + layout.size()`

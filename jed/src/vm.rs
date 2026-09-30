@@ -382,8 +382,7 @@ impl VM {
                         (*frame.locals)
                             .borrow()
                             .iter()
-                            .map(|tpl| utils::display_bytes(tpl.0))
-                            .collect::<Vec<String>>()
+                            .collect::<Vec<&'static &Object>>()
                     ),
                     Err(_) => todo!(),
                 };

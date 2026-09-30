@@ -29,27 +29,26 @@ pub enum Operation {
     #[jed(type: Option<&'static [u8]>, func: display_option_bytes)]
     #[jed(type: fn(&[&Object]) -> Response, func: (|_| "external function"))]
     Call(Option<&'static [u8]>),
-    PushLit(usize),
-    PushManyLits(usize, Option<usize>),
-    PushName(&'static [u8]),
+    PushConst(usize),
+    PushManyConst(usize, Option<usize>),
+    Push(usize),
     PushTemp,
     Pop,
     Dupe,
     Swap,
-    ReturnIf(&'static [u8]),
-    StoreConst(&'static [u8]),
-    StoreName(&'static [u8]),
+    // ReturnIf(&'static [u8]),
+    Store(usize),
     StoreTemp,
     Func(&'static [u8], usize, Block),
     Exit,
     DoFor(Block),
-    DoForIn(&'static [u8], Block),
+    DoForIn(usize, Block),
     CreateList(Option<usize>),
     ListPush,
     ListGet(Option<usize>),
     ListSet(Option<usize>),
     ListAlloc(Option<usize>),
-    ListFill(usize, &'static [u8]),
+    ListFill(usize, usize),
     PushRange,
     RangeLoop(Block),
     GetPtr,
@@ -70,7 +69,8 @@ pub enum Operation {
     CreateObject(&'static [u8]),
     GetAttribute(&'static [u8]),
     SetAttribute(&'static [u8]),
-    Consts, // essentially just a label, just here for macros
+    Consts,
+    Name, // essentially just a label, just here for macros
 }
 
 pub enum Response {
@@ -88,13 +88,11 @@ impl Operation {
         // println!("{self}");
         match self {
             Operation::Call(_) => self.op_call(vm),
-            Operation::PushLit(_) => self.op_push_lit(vm),
-            Operation::PushName(_) => self.op_push_name(vm),
+            Operation::PushConst(_) => self.op_push_lit(vm),
+            Operation::Push(_) => self.op_push(vm),
             Operation::PushTemp => self.op_push_temp(vm),
             Operation::Pop => self.op_pop(vm),
-            Operation::ReturnIf(_) => self.op_return_if(vm),
-            Operation::StoreConst(_) => self.op_store_const(vm),
-            Operation::StoreName(_) => self.op_store_name(vm),
+            Operation::Store(_) => self.op_store(vm),
             Operation::StoreTemp => self.op_store_temp(vm),
             Operation::Func(_, _, _) => self.op_func(vm),
             Operation::Exit => self.op_exit(vm),
@@ -119,12 +117,13 @@ impl Operation {
             Operation::Swap => self.op_swap(vm),
             Operation::ListFill(_, _) => self.op_list_fill(vm),
             Operation::RangeLoop(_) => self.op_range_loop(vm),
-            Operation::PushManyLits(_, _) => self.op_push_many_lits(vm),
+            Operation::PushManyConst(_, _) => self.op_push_many_const(vm),
             Operation::Object(_, _, _) => self.op_object(vm),
             Operation::CreateObject(_) => self.op_create_object(vm),
             Operation::SetAttribute(_) => self.op_set_attribute(vm),
             Operation::GetAttribute(_) => self.op_get_attribute(vm),
             Operation::Consts => Response::Ok,
+            Operation::Name => Response::Ok,
             _ => todo!("{}", self),
         }
     }
@@ -156,7 +155,7 @@ impl Operation {
     #[inline(never)]
     fn op_push_lit(&self, vm: &mut VM) -> Response {
         match self {
-            Operation::PushLit(idx) => match vm.program.get_const(*idx) {
+            Operation::PushConst(idx) => match vm.program.get_const(*idx) {
                 Ok(obj) => {
                     let obj = vm.register_single(obj);
                     vm.obj_stack.push(obj);
@@ -169,15 +168,15 @@ impl Operation {
     }
 
     #[inline(never)]
-    fn op_push_name(&self, vm: &mut VM) -> Response {
+    fn op_push(&self, vm: &mut VM) -> Response {
         match self {
-            Operation::PushName(name) => match vm.call_stack.last() {
-                Ok(frame) => match frame.get_local(name) {
+            Operation::Push(name) => match vm.call_stack.last() {
+                Ok(frame) => match frame.get_local(*name) {
                     Some(v) => {
                         vm.obj_stack.push(v);
                         Response::Ok
                     }
-                    None => Response::Error(ProgramErrorKind::VariableExists(name)),
+                    None => Response::Error(ProgramErrorKind::TodoError),
                 },
                 Err(_) => return Response::Error(ProgramErrorKind::StackError(1)),
             },
@@ -212,62 +211,9 @@ impl Operation {
     }
 
     #[inline(never)]
-    fn op_return_if(&self, vm: &mut VM) -> Response {
+    fn op_store(&self, vm: &mut VM) -> Response {
         match self {
-            Operation::ReturnIf(name) => {
-                let b = {
-                    match { vm.obj_stack.pop() } {
-                        Ok(t) => t,
-                        Err(_) => return Response::Error(ProgramErrorKind::StackError(1)),
-                    }
-                };
-                assert_eq!(b.kind, ObjectKind::Bool, "Object is not a boolean");
-                match b.data {
-                    ObjectData::Bool(bol) => {
-                        if bol {
-                            let frame = {
-                                match { vm.call_stack.last() } {
-                                    Ok(t) => t,
-                                    Err(_) => {
-                                        return Response::Error(ProgramErrorKind::StackError(1));
-                                    }
-                                }
-                            };
-                            if let Some(obj) = frame.get_local(name) {
-                                vm.obj_stack.push(obj);
-                                // vm.program.set_memo(frame.memo_key, *obj);
-                                return Response::BlockReturn;
-                            } else {
-                                return Response::Error(ProgramErrorKind::VariableExists(name));
-                            }
-                        }
-                        Response::Ok
-                    }
-                    _ => Response::Error(ProgramErrorKind::TypeError(ObjectKind::Bool, b.kind)),
-                }
-            }
-            _ => unreachable!(),
-        }
-    }
-
-    #[inline(never)]
-    fn op_store_const(&self, vm: &mut VM) -> Response {
-        match self {
-            Operation::StoreConst(name) => match { vm.obj_stack.pop() } {
-                Ok(t) => {
-                    // vm.store_const(*name, *t);
-                    return Response::Ok;
-                }
-                Err(_) => Response::Error(ProgramErrorKind::StackError(1)),
-            },
-            _ => unreachable!(),
-        }
-    }
-
-    #[inline(never)]
-    fn op_store_name(&self, vm: &mut VM) -> Response {
-        match self {
-            Operation::StoreName(name) => match vm.call_stack.last_mut() {
+            Operation::Store(name) => match vm.call_stack.last_mut() {
                 Ok(frame) => {
                     match vm.obj_stack.pop() {
                         Ok(obj) => {
@@ -352,9 +298,9 @@ impl Operation {
                         Err(_) => unreachable!("There should never be an empty call stack"),
                     }
                 };
-                let maybe_obj_ptr = current_frame.get_local(obj_name);
-                let obj_ptr = maybe_obj_ptr
-                    .unwrap_or_else(|| panic!("No such name '{}'", utils::display_bytes(obj_name)));
+                let maybe_obj_ptr = current_frame.get_local(*obj_name);
+                let obj_ptr =
+                    maybe_obj_ptr.unwrap_or_else(|| panic!("No such name '{}'", obj_name));
                 let pc = vm.counter.clone();
                 let mut new_frame = Frame::new(pc, FrameKind::DoForInLoop);
                 new_frame.copy_locals(current_frame);
@@ -710,7 +656,7 @@ impl Operation {
                     .call_stack
                     .last()
                     .unwrap()
-                    .get_local(b"@iter")
+                    .internal
                     .map(|o: &'static Object| o.data);
                 // let locals = vm.call_stack.last().unwrap().locals.borrow().iter();
                 match data {
@@ -741,10 +687,7 @@ impl Operation {
                         ..
                     } = object =>
                 {
-                    vm.call_stack
-                        .last_mut()
-                        .unwrap()
-                        .add_local(b"@iter", object);
+                    vm.call_stack.last_mut().unwrap().set_internal(object);
                     while let Some(obj) = (unsafe { iter.as_mut_unchecked() }).next() {
                         vm.obj_stack.push(obj);
                         vm.run_block(block);
@@ -899,9 +842,9 @@ impl Operation {
     }
 
     #[inline(never)]
-    fn op_push_many_lits(&self, vm: &mut VM) -> Response {
+    fn op_push_many_const(&self, vm: &mut VM) -> Response {
         match self {
-            Operation::PushManyLits(idx, maybe_n) => {
+            Operation::PushManyConst(idx, maybe_n) => {
                 let n = match maybe_n {
                     Some(n) => *n,
                     None => match vm.obj_stack.pop() {

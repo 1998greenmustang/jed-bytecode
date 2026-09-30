@@ -214,14 +214,13 @@ impl<T> List<T> {
         }
     }
 
-    pub fn insert(&self, idx: usize, item: &T) {
+    pub fn insert(&mut self, idx: usize, item: T) {
         if self.len > idx {
-            unsafe { std::ptr::copy(item, self.ptr.add(idx).as_mut(), 1) }
+            unsafe { std::ptr::copy(&item, self.ptr.add(idx).as_mut(), 1) }
+        } else if self.len == idx {
+            self.push(item)
         } else {
-            panic!(
-                "no such index {idx} in a list with length of {}",
-                self.len()
-            );
+            panic!("no such index {idx} in a list with length of {}", self.len);
         }
     }
 

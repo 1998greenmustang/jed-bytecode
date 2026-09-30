@@ -17,10 +17,11 @@ pub enum FrameKind {
 #[derive(Debug, Clone)]
 pub struct Frame {
     // String -> Literal
-    pub locals: Rc<RefCell<List<(&'static [u8], &'static Object)>>>,
+    pub locals: Rc<RefCell<List<&'static Object>>>,
     pub return_address: usize,
     pub memo_key: MemoKey,
     pub kind: FrameKind,
+    pub internal: Option<&'static Object>,
 }
 
 impl Frame {
@@ -30,21 +31,23 @@ impl Frame {
             locals: Rc::new(RefCell::new(List::new())),
             return_address,
             kind,
+            internal: None,
         }
     }
 
-    pub fn add_local(&mut self, name: &'static [u8], obj: &'static Object) {
+    pub fn set_internal(&mut self, obj: &'static Object) {
+        self.internal = Some(obj)
+    }
+
+    pub fn add_local(&mut self, name: usize, obj: &'static Object) {
         // if self.locals.contains_key(name) {
         //     panic!("{} has already been declared");
         // }
-        (*self.locals).borrow_mut().push((name, obj));
+        (*self.locals).borrow_mut().insert(name, &obj);
     }
 
-    pub fn get_local(&self, name: &'static [u8]) -> Option<&'static Object> {
-        (*self.locals)
-            .borrow()
-            .find(|(items, object)| *items == name)
-            .map(|tpl| tpl.1)
+    pub fn get_local(&self, name: usize) -> Option<&'static Object> {
+        (*self.locals).borrow().get(name).map(|v| *v)
     }
 
     pub fn copy_locals(&mut self, other: &Self) {
