@@ -16,7 +16,7 @@ pub enum ProgramErrorKind {
     TempPush,
     TypeError(ObjectKind, ObjectKind), // wanted, given
     ParsingError(String),
-    Overflow(isize, isize),
+    Overflow(i64, i64),
     IntegerToUnsigned,
     ListIndexError(usize, usize), // index, length
     ConstantExists(&'static [u8]),
@@ -25,6 +25,7 @@ pub enum ProgramErrorKind {
     TodoError,
     DoneAddress,
     RustObjectBinOp,
+    DivByZero,
 }
 
 impl Display for ProgramErrorKind {
@@ -79,6 +80,7 @@ impl Display for ProgramErrorKind {
                 f,
                 "left and right types are mismatched, implement your own binary op"
             ),
+            ProgramErrorKind::DivByZero => todo!(),
         }
     }
 }

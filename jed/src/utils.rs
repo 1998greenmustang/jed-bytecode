@@ -59,7 +59,3 @@ pub fn string_is_float_like(str: String) -> bool {
     }
     return has_dot;
 }
-
-pub fn isize_to_usize(i: isize) -> usize {
-    isize::cast_unsigned(i)
-}

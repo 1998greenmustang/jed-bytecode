@@ -1,14 +1,14 @@
-use std::{cell::RefCell, collections::HashMap, fs::File, io, mem::ManuallyDrop, rc::Rc};
+use std::{collections::HashMap, fs::File, io};
 
 use crate::{
     error::{ProgramError, ProgramErrorKind},
     frame::{Frame, FrameKind},
     memory::{self, list::List, stack::Stack},
-    object::{MutableObject, Object, ObjectData, RegObject},
+    modules::io::Io,
+    object::{MutableObject, Object, RegObject},
     operation::{Operation, Response},
     program::Program,
     span::Span,
-    utils,
 };
 
 pub struct VM {
@@ -20,6 +20,7 @@ pub struct VM {
     pub memory: memory::Manual<Object>,
     pub current_span: Span,
     pub debug: bool,
+    pub io: Io,
 }
 
 impl VM {
@@ -35,6 +36,7 @@ impl VM {
             memory: Default::default(),
             current_span: Span::empty(),
             debug,
+            io: Io::new(),
         }
     }
 
@@ -42,9 +44,8 @@ impl VM {
         if let Some(Operation::Object(_name, arity, block)) =
             self.program.constructors.get(name).cloned()
         {
-            let obj = self.register_single(Object::new(ObjectData::Data(Box::into_raw(Box::new(
-                HashMap::new(),
-            )))));
+            let obj =
+                self.register_single(Object::new_data(Box::into_raw(Box::new(HashMap::new()))));
             if self.obj_stack.len() >= arity {
                 self.obj_stack.push(obj);
                 self.run_block(&block);
@@ -92,6 +93,9 @@ impl VM {
                 } else {
                     &[]
                 };
+                // TODO clean this up, and think do memos even really belong here?
+                // feels like a more high level construct...
+                //
                 // match self.program.get_memo((name, args)).cloned() {
                 //     Some(value) => {
                 //         // println!("YES DUDE {:?}", args);
@@ -106,11 +110,11 @@ impl VM {
                 //     None => {
                 self.call_stack
                     .push(Frame::new(self.counter, FrameKind::Call));
-                let current_frame = match self.call_stack.last_mut() {
+                let _current_frame = match self.call_stack.last_mut() {
                     Ok(ts) => ts,
                     Err(e) => return Response::Error(e),
                 };
-                let args = if args.len() > 0 {
+                let _args = if args.len() > 0 {
                     self.program.register_arguments(args)
                 } else {
                     args
@@ -174,7 +178,7 @@ impl VM {
                         self.drop(&*obj);
                     }
                     while objects.len() != n {
-                        objects.push(Object::nil());
+                        objects.push(Object::new_nil());
                     }
                     let objects: &'static [Object] = self.register_many(&objects);
                     return Ok(objects.as_ptr());
@@ -226,16 +230,7 @@ impl VM {
                 panic!("call stack overflow");
             }
             if self.obj_stack.len() > 1_000_000_000 {
-                unsafe {
-                    panic!(
-                        "object stack overflow, {:?}",
-                        self.obj_stack
-                            .last_n(10)
-                            .iter()
-                            .map(|x| format!("{:?}", x))
-                            .collect::<Vec<String>>()
-                    )
-                }
+                panic!("obj stack overflow");
             }
 
             let res = op.call(self);
@@ -288,16 +283,7 @@ impl VM {
                 panic!("call stack overflow");
             }
             if self.obj_stack.len() > 10_000_000 {
-                unsafe {
-                    panic!(
-                        "object stack overflow, {:?}",
-                        self.obj_stack
-                            .last_n(10)
-                            .iter()
-                            .map(|x| format!("{:?}", x))
-                            .collect::<Vec<String>>()
-                    )
-                }
+                panic!("object stack overflow");
             }
             let res = op.call(self);
 
@@ -327,7 +313,6 @@ impl VM {
         self.counter = 0;
         self.obj_stack = Stack::new();
         self.call_stack = Stack::new();
-        self.program.memos.clear();
         std::process::exit(code.unwrap_or_default());
     }
 
@@ -376,35 +361,37 @@ impl VM {
         match e {
             ProgramErrorKind::VariableExists(_) => {
                 match self.call_stack.last().cloned() {
-                    Ok(frame) => println!(
-                        "frame type: {:?}, current variables: {:?}",
-                        (frame.kind),
-                        (*frame.locals)
-                            .borrow()
-                            .iter()
-                            .collect::<Vec<&'static &Object>>()
-                    ),
+                    Ok(_frame) => todo!(),
+                    // println!(
+                    //     "frame type: {:?}, current variables: {:?}",
+                    //     (frame.kind),
+                    //     (*frame.locals)
+                    //         .borrow()
+                    //         .iter()
+                    //         .collect::<Vec<&'static &Object>>()
+                    // ),
                     Err(_) => todo!(),
                 };
             }
-            ProgramErrorKind::StackError(_) => unsafe {
-                println!(
-                    "call stack: {:?}",
-                    self.call_stack
-                        .last_n(10)
-                        .iter()
-                        .map(|x| format!("{:?}", x))
-                        .collect::<Vec<String>>()
-                );
-                println!(
-                    "object stack: {:?}",
-                    self.obj_stack
-                        .last_n(10)
-                        .iter()
-                        .map(|x| format!("{:?}", x))
-                        .collect::<Vec<String>>()
-                );
-            },
+            ProgramErrorKind::StackError(_) => {
+                // println!(
+                //     "call stack: {:?}",
+                //     self.call_stack
+                //         .last_n(10)
+                //         .iter()
+                //         .map(|x| format!("{:?}", x))
+                //         .collect::<Vec<String>>()
+                // );
+                // println!(
+                //     "object stack: {:?}",
+                //     self.obj_stack
+                //         .last_n(10)
+                //         .iter()
+                //         .map(|x| format!("{:?}", x))
+                //         .collect::<Vec<String>>()
+                // );
+                todo!()
+            }
             _ => {}
         };
 

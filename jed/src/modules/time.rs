@@ -43,3 +43,4 @@ impl RustObject for Duration {
 
 pub const FUNCTIONS: &[Operation] = &[Operation::ExternFunc(b"now", 0, now)];
 pub const MODULE: &[u8] = b"time";
+pub const INTERNAL: bool = false;

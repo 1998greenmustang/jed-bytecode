@@ -1,4 +1,4 @@
-use std::{cell::RefCell, convert::TryInto, fmt::Display, mem::ManuallyDrop, rc::Rc};
+use std::{convert::TryInto, fmt::Display, mem::ManuallyDrop, rc::Rc};
 
 use jed_macros::{
     IndexFroms, IndexToSnakeCase, SnakeCaseDisplay, SnakeCaseExists, SnakeCaseToIndex,
@@ -8,17 +8,19 @@ use crate::{
     error::ProgramErrorKind::{self, TodoError, TypeError},
     frame::{
         Frame,
-        FrameKind::{self, DoIfBlock},
+        FrameKind::{self},
     },
     memory::list::List,
     modules::MODULES,
-    object::{MutableObject, Object, ObjectData, ObjectKind, RegObject},
-    utils::{self, display_bytes, display_option_bytes, display_option_usize},
+    object::{MutableObject, Object, ObjectKind, RegObject},
+    utils::{display_bytes, display_option_bytes, display_option_usize},
     vm::VM,
 };
 
 pub type Block = Rc<List<Operation>>;
 
+// add a label and jump
+// what if theres a conditional jump, but it uses temp :thinking:
 #[repr(u8)]
 #[derive(
     Clone, Debug, SnakeCaseDisplay, SnakeCaseToIndex, IndexToSnakeCase, SnakeCaseExists, IndexFroms,
@@ -138,8 +140,8 @@ impl Operation {
                         Ok(o) => o,
                         Err(e) => return Response::Error(e),
                     };
-                    if let ObjectData::Func(name) = obj.data {
-                        return vm.call(name);
+                    if obj.is(ObjectKind::Func) {
+                        return vm.call(obj.func());
                     } else {
                         return Response::Error(ProgramErrorKind::TypeError(
                             ObjectKind::Func,
@@ -264,7 +266,8 @@ impl Operation {
         match self {
             Operation::DoFor(block) => match { vm.obj_stack.pop() } {
                 Ok(obj) => {
-                    if let ObjectData::Integer(times) = obj.data {
+                    if obj.is(ObjectKind::Integer) {
+                        let times = obj.integer();
                         let pc = vm.counter.clone();
                         match vm.call_stack.last() {
                             Ok(last_frame) => {
@@ -277,7 +280,7 @@ impl Operation {
                                 }
                                 let _ = vm.call_stack.pop();
                             }
-                            Err(err) => unreachable!("There should never be an empty call stack"),
+                            Err(_) => unreachable!("There should never be an empty call stack"),
                         };
                     }
                     Response::Ok
@@ -298,32 +301,28 @@ impl Operation {
                         Err(_) => unreachable!("There should never be an empty call stack"),
                     }
                 };
-                let maybe_obj_ptr = current_frame.get_local(*obj_name);
-                let obj_ptr =
-                    maybe_obj_ptr.unwrap_or_else(|| panic!("No such name '{}'", obj_name));
+                let maybe_obj = current_frame.get_local(*obj_name);
+                let obj = maybe_obj.unwrap_or_else(|| panic!("No such name '{}'", obj_name));
                 let pc = vm.counter.clone();
                 let mut new_frame = Frame::new(pc, FrameKind::DoForInLoop);
                 new_frame.copy_locals(current_frame);
                 vm.call_stack.push(new_frame);
-                match obj_ptr.as_tuple() {
-                    (ObjectKind::List, ObjectData::List(list)) => unsafe {
-                        for _ in 0..(*list).len() {
-                            vm.run_block(&Rc::clone(block));
-                        }
-                    },
-                    (ObjectKind::Iterator, ObjectData::Iterator(iter)) => {
-                        while let Some(_obj) = (unsafe { *iter }).next() {
-                            vm.counter = pc;
+                if obj.is(ObjectKind::List) {
+                    unsafe {
+                        for _ in 0..(*obj.list()).len() {
                             vm.run_block(&Rc::clone(block));
                         }
                     }
-
-                    (kind, _data) => {
-                        return Response::Error(ProgramErrorKind::TypeError(
-                            ObjectKind::List,
-                            kind,
-                        ));
+                } else if obj.is(ObjectKind::Iterator) {
+                    while let Some(_obj) = (unsafe { *obj.iterator() }).next() {
+                        vm.counter = pc;
+                        vm.run_block(&Rc::clone(block));
                     }
+                } else {
+                    return Response::Error(ProgramErrorKind::TypeError(
+                        ObjectKind::List,
+                        obj.kind,
+                    ));
                 }
                 let _ = vm.call_stack.pop();
                 return Response::Ok;
@@ -348,9 +347,7 @@ impl Operation {
                     Ok(objs) => objs.iter().map(|o| list.push(*o)).collect::<()>(),
                     Err(e) => return Response::Error(e),
                 };
-                let obj = Object::new(ObjectData::List(Box::into_raw(Box::new(
-                    ManuallyDrop::new(list),
-                ))));
+                let obj = Object::new_list(Box::into_raw(Box::new(ManuallyDrop::new(list))));
                 let obj: MutableObject = vm.register_single_mut(obj);
                 vm.obj_stack.push(obj);
 
@@ -366,14 +363,14 @@ impl Operation {
             Operation::ListPush => unsafe {
                 match vm.obj_stack.pop() {
                     Ok(new_item) => match { vm.obj_stack.pop_mut() } {
-                        Ok(&mut &Object { ref kind, data }) => {
-                            if let ObjectData::List(list) = data {
-                                (*list).push(&new_item);
+                        Ok(obj) => {
+                            if obj.is(ObjectKind::List) {
+                                (*obj.list()).push(&new_item);
                                 return Response::Ok;
                             } else {
                                 return Response::Error(ProgramErrorKind::TypeError(
                                     ObjectKind::List,
-                                    *kind,
+                                    obj.kind,
                                 ));
                             }
                         }
@@ -395,39 +392,32 @@ impl Operation {
                     None => {
                         let obj = vm.obj_stack.pop();
                         match obj {
-                            Ok(v) => match v.as_tuple() {
-                                (ObjectKind::Integer, ObjectData::Integer(n)) => {
-                                    utils::isize_to_usize(n)
-                                }
-                                (kind, _data) => {
-                                    return Response::Error(ProgramErrorKind::TypeError(
-                                        ObjectKind::Integer,
-                                        kind,
-                                    ));
-                                }
-                            },
-
+                            Ok(v) if v.is_usizeable() => v.usize(),
+                            Ok(v) => {
+                                return Response::Error(ProgramErrorKind::TypeError(
+                                    ObjectKind::Integer,
+                                    v.kind,
+                                ));
+                            }
                             Err(e) => return Response::Error(e),
                         }
                     }
                 };
                 match { vm.obj_stack.pop() } {
-                    Ok(list_obj) => match (list_obj.kind, list_obj.data) {
-                        (ObjectKind::List, ObjectData::List(list)) => unsafe {
-                            if let Some(obj) = (*list).get(idx) {
-                                vm.obj_stack.push(obj);
-                                Response::Ok
-                            } else {
-                                Response::Error(ProgramErrorKind::ListIndexError(
-                                    idx,
-                                    (*list).len(),
-                                ))
-                            }
-                        },
-                        (kind, _data) => {
-                            Response::Error(ProgramErrorKind::TypeError(ObjectKind::List, kind))
+                    Ok(object) if object.is(ObjectKind::List) => unsafe {
+                        if let Some(obj) = (*object.list()).get(idx) {
+                            vm.obj_stack.push(obj);
+                            Response::Ok
+                        } else {
+                            Response::Error(ProgramErrorKind::ListIndexError(
+                                idx,
+                                (*object.data.list).len(),
+                            ))
                         }
                     },
+                    Ok(object) => {
+                        Response::Error(ProgramErrorKind::TypeError(ObjectKind::List, object.kind))
+                    }
                     Err(e) => Response::Error(e),
                 }
             }
@@ -444,17 +434,13 @@ impl Operation {
                     None => {
                         let obj = vm.obj_stack.pop();
                         match obj {
-                            Ok(v) => match v.as_tuple() {
-                                (ObjectKind::Integer, ObjectData::Integer(n)) => {
-                                    utils::isize_to_usize(n)
-                                }
-                                (kind, _data) => {
-                                    return Response::Error(ProgramErrorKind::TypeError(
-                                        ObjectKind::Integer,
-                                        kind,
-                                    ));
-                                }
-                            },
+                            Ok(obj) if obj.is_usizeable() => obj.usize(),
+                            Ok(obj) => {
+                                return Response::Error(ProgramErrorKind::TypeError(
+                                    ObjectKind::Integer,
+                                    obj.kind,
+                                ));
+                            }
 
                             Err(e) => return Response::Error(e),
                         }
@@ -462,24 +448,24 @@ impl Operation {
                 };
                 match { vm.obj_stack.pop_n(2) } {
                     Ok(objects) => {
-                        let list_obj = objects[1];
+                        let list = objects[1];
                         let obj = objects[0];
 
-                        match (list_obj.kind, list_obj.data) {
-                            (ObjectKind::List, ObjectData::List(list)) => {
-                                if idx < (*list).len() {
-                                    (*list).insert(idx, &obj);
-                                    Response::Ok
-                                } else {
-                                    Response::Error(ProgramErrorKind::ListIndexError(
-                                        idx,
-                                        (*list).len(),
-                                    ))
-                                }
+                        if list.is(ObjectKind::List) {
+                            if idx < (*list.list()).len() {
+                                (*list.list()).insert(idx, &obj);
+                                Response::Ok
+                            } else {
+                                Response::Error(ProgramErrorKind::ListIndexError(
+                                    idx,
+                                    (*list.list()).len(),
+                                ))
                             }
-                            (kind, _) => {
-                                Response::Error(ProgramErrorKind::TypeError(ObjectKind::List, kind))
-                            }
+                        } else {
+                            Response::Error(ProgramErrorKind::TypeError(
+                                ObjectKind::List,
+                                list.kind,
+                            ))
                         }
                     }
                     Err(e) => Response::Error(e),
@@ -498,29 +484,26 @@ impl Operation {
                     None => {
                         let obj = vm.obj_stack.pop();
                         match obj {
-                            Ok(v) => match v.as_tuple() {
-                                (ObjectKind::Integer, ObjectData::Integer(n)) => {
-                                    utils::isize_to_usize(n)
-                                }
-                                (kind, _data) => {
-                                    return Response::Error(ProgramErrorKind::TypeError(
-                                        ObjectKind::Integer,
-                                        kind,
-                                    ));
-                                }
-                            },
-
+                            Ok(v) if v.is_usizeable() => v.usize(),
+                            Ok(v) => {
+                                return Response::Error(ProgramErrorKind::TypeError(
+                                    ObjectKind::Integer,
+                                    v.kind,
+                                ));
+                            }
                             Err(e) => return Response::Error(e),
                         }
                     }
                 };
                 match { vm.obj_stack.pop_mut() } {
-                    Ok(&mut &Object { ref kind, mut data }) => {
-                        if let ObjectData::List(list) = data {
+                    Ok(&mut &Object { kind, data }) => {
+                        if kind == ObjectKind::List
+                            && let list = data.list
+                        {
                             (*list).alloc(num);
                             Response::Ok
                         } else {
-                            Response::Error(ProgramErrorKind::TypeError(ObjectKind::List, *kind))
+                            Response::Error(ProgramErrorKind::TypeError(ObjectKind::List, kind))
                         }
                     }
                     Err(_) => Response::Error(ProgramErrorKind::StackError(1)),
@@ -538,15 +521,27 @@ impl Operation {
                     Ok(xs) => (xs[2], xs[1], xs[0]),
                     Err(e) => return Response::Error(e),
                 };
-                match (start.data, end.data, steps.data) {
-                    (ObjectData::Integer(s), ObjectData::Integer(n), ObjectData::Integer(ps)) => {
-                        let p: usize = match ps.try_into() {
-                            Ok(v) => v,
-                            Err(_) => return Response::Error(ProgramErrorKind::IntegerToUnsigned),
-                        };
-                        let values = (s..n)
-                            .step_by(p)
-                            .map(|v| Object::new(ObjectData::Integer(v)))
+                let steps = if steps.is_usizeable() {
+                    steps.usize()
+                } else {
+                    return Response::Error(TodoError);
+                };
+                match (start.kind, end.kind) {
+                    (ObjectKind::Integer, ObjectKind::Integer) => {
+                        let values = (start.integer()..end.integer())
+                            .step_by(steps)
+                            .map(|v| Object::new_integer(v))
+                            .collect::<Vec<Object>>();
+                        if values.len() > 0 {
+                            let values: &'static [Object] = vm.register_many(&values);
+                            values.iter().for_each(|v| vm.obj_stack.push(v));
+                        }
+                        return Response::Ok;
+                    }
+                    (ObjectKind::UnsignedInt, ObjectKind::UnsignedInt) => {
+                        let values = (start.unsigned()..end.unsigned())
+                            .step_by(steps)
+                            .map(|v| Object::new_unsigned(v))
                             .collect::<Vec<Object>>();
                         if values.len() > 0 {
                             let values: &'static [Object] = vm.register_many(&values);
@@ -562,66 +557,66 @@ impl Operation {
     }
 
     #[inline(never)]
-    fn op_get_ptr(&self, vm: &mut VM) -> Response {
+    fn op_get_ptr(&self, _vm: &mut VM) -> Response {
         match self {
-            Operation::GetPtr => match { vm.obj_stack.pop() } {
-                Ok(obj) => {
-                    let ptr_obj = Object::new(ObjectData::Pointer(&mut &*obj as *mut &Object));
-                    let ptr_obj: RegObject = vm.register_single(ptr_obj);
-                    vm.obj_stack.push(ptr_obj);
-                    Response::Ok
-                }
-                Err(_) => Response::Error(ProgramErrorKind::StackError(1)),
-            },
-            _ => unreachable!(),
+            //     Operation::GetPtr => match { vm.obj_stack.pop() } {
+            //         Ok(obj) => {
+            //             let ptr_obj = Object::new(ObjectData::Pointer(&mut &*obj as *mut &Object));
+            //             let ptr_obj: RegObject = vm.register_single(ptr_obj);
+            //             vm.obj_stack.push(ptr_obj);
+            //             Response::Ok
+            //         }
+            //         Err(_) => Response::Error(ProgramErrorKind::StackError(1)),
+            //     },
+            _ => todo!("pointer ops"),
         }
     }
 
     #[inline(never)]
-    fn op_read_ptr(&self, vm: &mut VM) -> Response {
+    fn op_read_ptr(&self, _vm: &mut VM) -> Response {
         match self {
-            Operation::ReadPtr => match { vm.obj_stack.pop() } {
-                Ok(ptr_obj) => {
-                    if let ObjectData::Pointer(real_ptr) = ptr_obj.data {
-                        let val: RegObject = unsafe { real_ptr.read() };
-                        vm.obj_stack.push(val);
-                        Response::Ok
-                    } else {
-                        Response::Error(ProgramErrorKind::TypeError(
-                            ObjectKind::Pointer,
-                            ptr_obj.kind,
-                        ))
-                    }
-                }
-                Err(_) => Response::Error(ProgramErrorKind::StackError(1)),
-            },
-            _ => unreachable!(),
+            // Operation::ReadPtr => match { vm.obj_stack.pop() } {
+            //     Ok(ptr_obj) => {
+            //         if let ObjectData::Pointer(real_ptr) = ptr_obj.data {
+            //             let val: RegObject = unsafe { real_ptr.read() };
+            //             vm.obj_stack.push(val);
+            //             Response::Ok
+            //         } else {
+            //             Response::Error(ProgramErrorKind::TypeError(
+            //                 ObjectKind::Pointer,
+            //                 ptr_obj.kind,
+            //             ))
+            //         }
+            //     }
+            //     Err(_) => Response::Error(ProgramErrorKind::StackError(1)),
+            // },
+            _ => todo!("pointer ops"),
         }
     }
 
     #[inline(never)]
-    fn op_set_ptr(&self, vm: &mut VM) -> Response {
+    fn op_set_ptr(&self, _vm: &mut VM) -> Response {
         match self {
-            Operation::SetPtr => unsafe {
-                match { vm.obj_stack.pop_n(2) } {
-                    Ok(objects) => {
-                        let obj = objects.get_unchecked(0);
-                        let ptr_obj = objects.get_unchecked(1);
+            // Operation::SetPtr => unsafe {
+            // match { vm.obj_stack.pop_n(2) } {
+            //     Ok(objects) => {
+            //         let obj = objects.get_unchecked(0);
+            //         let ptr_obj = objects.get_unchecked(1);
 
-                        if let ObjectData::Pointer(real_ptr) = ptr_obj.data {
-                            real_ptr.copy_from(obj, 1);
-                            Response::Ok
-                        } else {
-                            Response::Error(ProgramErrorKind::TypeError(
-                                ObjectKind::Pointer,
-                                ptr_obj.kind,
-                            ))
-                        }
-                    }
-                    Err(_) => Response::Error(ProgramErrorKind::StackError(2)),
-                }
-            },
-            _ => unreachable!(),
+            //         if let ObjectData::Pointer(real_ptr) = ptr_obj.data {
+            //             real_ptr.copy_from(obj, 1);
+            //             Response::Ok
+            //         } else {
+            //             Response::Error(ProgramErrorKind::TypeError(
+            //                 ObjectKind::Pointer,
+            //                 ptr_obj.kind,
+            //             ))
+            //         }
+            //     }
+            //     Err(_) => Response::Error(ProgramErrorKind::StackError(2)),
+            // }
+            // },
+            _ => todo!("pointer ops"),
         }
     }
 
@@ -629,19 +624,15 @@ impl Operation {
     fn op_create_iter(&self, vm: &mut VM) -> Response {
         match self {
             Operation::CreateIter => match { vm.obj_stack.pop() } {
-                Ok(list_obj) => match list_obj.data {
-                    ObjectData::List(ls) => {
-                        let iter = Box::new(unsafe { (*ls).clone() }.iter());
-                        let iter_obj = Object::new(ObjectData::Iterator(Box::into_raw(iter)));
-                        let iter_obj: RegObject = vm.register_single(iter_obj);
-                        vm.obj_stack.push(iter_obj);
-                        Response::Ok
-                    }
-                    _ => Response::Error(ProgramErrorKind::TypeError(
-                        ObjectKind::List,
-                        list_obj.kind,
-                    )),
-                },
+                Ok(list_obj) if list_obj.is(ObjectKind::List) => {
+                    let ls = list_obj.list();
+                    let iter = Box::new(unsafe { (*ls).clone() }.iter());
+                    let iter_obj = Object::new_iterator(Box::into_raw(iter));
+                    let iter_obj: RegObject = vm.register_single(iter_obj);
+                    vm.obj_stack.push(iter_obj);
+                    Response::Ok
+                }
+                Ok(obj) => Response::Error(ProgramErrorKind::TypeError(ObjectKind::List, obj.kind)),
                 Err(_) => Response::Error(ProgramErrorKind::StackError(1)),
             },
             _ => unreachable!(),
@@ -652,24 +643,21 @@ impl Operation {
     fn op_iter_current(&self, vm: &mut VM) -> Response {
         match self {
             Operation::IterCurrent => {
-                let data = vm
-                    .call_stack
-                    .last()
-                    .unwrap()
-                    .internal
-                    .map(|o: &'static Object| o.data);
+                let data = vm.call_stack.last().unwrap().internal;
                 // let locals = vm.call_stack.last().unwrap().locals.borrow().iter();
                 match data {
-                    Some(data) if let ObjectData::Iterator(iter) = data => {
-                        let obj = Object::new(ObjectData::UnsignedInt(
-                            unsafe { (*iter).clone() }.current - 1,
-                        ));
+                    Some(data) if data.is(ObjectKind::Iterator) => {
+                        let obj = Object::new_unsigned(
+                            (unsafe { (*data.iterator()).clone() }.current - 1)
+                                .try_into()
+                                .unwrap(),
+                        );
                         let obj: RegObject = vm.register_single(obj);
                         vm.obj_stack.push(obj);
 
                         Response::Ok
                     }
-                    Some(data) => Response::Error(TypeError(ObjectKind::Iterator, data.into())),
+                    Some(data) => Response::Error(TypeError(ObjectKind::Iterator, data.kind)),
                     None => todo!(),
                 }
             }
@@ -681,22 +669,18 @@ impl Operation {
     fn op_iterate(&self, vm: &mut VM) -> Response {
         match self {
             Operation::Iterate(block) => match { vm.obj_stack.pop_mut() } {
-                Ok(&mut object)
-                    if let Object {
-                        data: ObjectData::Iterator(iter),
-                        ..
-                    } = object =>
-                {
+                Ok(&mut object) if object.is(ObjectKind::Iterator) => {
                     vm.call_stack.last_mut().unwrap().set_internal(object);
-                    while let Some(obj) = (unsafe { iter.as_mut_unchecked() }).next() {
+                    while let Some(obj) = (unsafe { object.iterator().as_mut_unchecked() }).next() {
                         vm.obj_stack.push(obj);
                         vm.run_block(block);
                     }
                     Response::IterationDone
                 }
-                Ok(Object { kind, data }) => {
-                    Response::Error(ProgramErrorKind::TypeError(ObjectKind::Iterator, *kind))
-                }
+                Ok(object) => Response::Error(ProgramErrorKind::TypeError(
+                    ObjectKind::Iterator,
+                    object.kind,
+                )),
                 Err(_) => Response::Error(ProgramErrorKind::StackError(1)),
             },
             _ => unreachable!(),
@@ -712,14 +696,13 @@ impl Operation {
                     Err(e) => return Response::Error(e),
                 };
 
-                match b.data {
-                    ObjectData::Bool(bol) => {
-                        if bol {
-                            vm.run_block(block);
-                        }
-                        Response::Ok
+                if b.is(ObjectKind::Bool) {
+                    if b.bool() {
+                        vm.run_block(block);
                     }
-                    _ => Response::Error(ProgramErrorKind::TypeError(ObjectKind::Bool, b.kind)),
+                    Response::Ok
+                } else {
+                    Response::Error(ProgramErrorKind::TypeError(ObjectKind::Bool, b.kind))
                 }
             }
             _ => unreachable!(),
@@ -727,7 +710,7 @@ impl Operation {
     }
 
     #[inline(never)]
-    fn op_debug(&self, vm: &mut VM) -> Response {
+    fn op_debug(&self, _vm: &mut VM) -> Response {
         match self {
             Operation::Debug => {
                 // let objs = match unsafe { vm.obj_stack.at_most_n(10) } {
@@ -750,8 +733,9 @@ impl Operation {
     fn op_import(&self, vm: &mut VM) -> Response {
         match self {
             Operation::Import(module) => {
-                if let Some(m) = MODULES.iter().find(|m| m.0 == *module) {
-                    for func in m.1 {
+                if let Some(m) = MODULES.iter().find(|m| m.1 == *module) {
+                    // TODO save imported modules?
+                    for func in m.2 {
                         let Operation::ExternFunc(name, _, _) = func else {
                             unreachable!()
                         };
@@ -798,7 +782,7 @@ impl Operation {
     }
 
     #[inline(never)]
-    fn op_list_fill(&self, vm: &mut VM) -> Response {
+    fn op_list_fill(&self, _vm: &mut VM) -> Response {
         match self {
             Operation::ListFill(_, _) => todo!(),
             _ => unreachable!(),
@@ -813,15 +797,33 @@ impl Operation {
                     Ok(xs) => (xs[2], xs[1], xs[0]),
                     Err(e) => return Response::Error(e),
                 };
-                match (start.data, end.data, steps.data) {
-                    (ObjectData::Integer(s), ObjectData::Integer(n), ObjectData::Integer(ps)) => {
-                        let p: usize = match ps.try_into() {
-                            Ok(v) => v,
-                            Err(_) => return Response::Error(ProgramErrorKind::IntegerToUnsigned),
-                        };
-                        let values = (s..n)
-                            .step_by(p)
-                            .map(|v| Object::new(ObjectData::Integer(v)));
+                let steps = if steps.is_usizeable() {
+                    steps.usize()
+                } else {
+                    todo!()
+                };
+                match (start.kind, end.kind) {
+                    (ObjectKind::Integer, ObjectKind::Integer) => {
+                        let values = (start.integer()..end.integer())
+                            .step_by(steps)
+                            .map(|v| Object::new_integer(v));
+                        let last_frame = vm.call_stack.last().unwrap();
+                        let mut new_frame = Frame::new(vm.counter, FrameKind::RangeLoop);
+                        new_frame.copy_locals(last_frame);
+                        vm.call_stack.push(new_frame);
+
+                        for i in values {
+                            let i = vm.register_single(i);
+                            vm.obj_stack.push(i);
+                            vm.run_block(&Rc::clone(block));
+                        }
+                        return Response::IterationDone;
+                    }
+                    (ObjectKind::UnsignedInt, ObjectKind::UnsignedInt) => {
+                        let values = (start.unsigned()..end.unsigned())
+                            .step_by(steps)
+                            .map(|v| Object::new_unsigned(v))
+                            .collect::<Vec<Object>>();
                         let last_frame = vm.call_stack.last().unwrap();
                         let mut new_frame = Frame::new(vm.counter, FrameKind::RangeLoop);
                         new_frame.copy_locals(last_frame);
@@ -848,10 +850,10 @@ impl Operation {
                 let n = match maybe_n {
                     Some(n) => *n,
                     None => match vm.obj_stack.pop() {
-                        Ok(o) => match o.data.try_into() {
-                            Ok(n) => n,
-                            Err(e) => return Response::Error(e),
-                        },
+                        Ok(o) if o.is_usizeable() => o.usize(),
+                        Ok(o) => {
+                            return Response::Error(TypeError(ObjectKind::UnsignedInt, o.kind));
+                        }
                         Err(e) => return Response::Error(e),
                     },
                 };
@@ -872,7 +874,7 @@ impl Operation {
     }
 
     #[inline(never)]
-    fn op_object(&self, vm: &mut VM) -> Response {
+    fn op_object(&self, _vm: &mut VM) -> Response {
         match self {
             Operation::Object(_name, _arity, _block) => Response::Ok,
             _ => unreachable!(),
@@ -891,22 +893,20 @@ impl Operation {
     fn op_set_attribute(&self, vm: &mut VM) -> Response {
         match self {
             Operation::SetAttribute(name) => {
-                let obj = vm.obj_stack.pop();
-                match obj {
-                    Ok(Object {
-                        data: ObjectData::Data(ptr),
-                        ..
-                    }) => {
+                let object = vm.obj_stack.pop();
+                match object {
+                    Ok(obj) if obj.is(ObjectKind::Data) => {
+                        let ptr = obj.data();
                         if let Ok(attr) = vm.obj_stack.pop() {
                             unsafe { ptr.as_mut_unchecked() }.insert(name, attr);
-                            vm.obj_stack.push(obj.unwrap());
+                            vm.obj_stack.push(object.unwrap());
                             Response::Ok
                         } else {
                             Response::Error(ProgramErrorKind::StackError(1))
                         }
                     }
                     Ok(_) => todo!(),
-                    Err(e) => todo!(),
+                    Err(_e) => todo!(),
                 }
             }
             _ => unreachable!(),
@@ -917,12 +917,10 @@ impl Operation {
     fn op_get_attribute(&self, vm: &mut VM) -> Response {
         match self {
             Operation::GetAttribute(name) => {
-                let obj = vm.obj_stack.pop();
-                match obj {
-                    Ok(Object {
-                        data: ObjectData::Data(ptr),
-                        ..
-                    }) => {
+                let object = vm.obj_stack.pop();
+                match object {
+                    Ok(obj) if obj.is(ObjectKind::Data) => {
+                        let ptr = obj.data();
                         if let Some(attr) = unsafe { ptr.as_ref_unchecked() }.get(name) {
                             vm.obj_stack.push(attr);
                             Response::Ok
@@ -931,7 +929,7 @@ impl Operation {
                         }
                     }
                     Ok(_) => todo!(),
-                    Err(e) => todo!(),
+                    Err(_e) => todo!(),
                 }
             }
             _ => unreachable!(),

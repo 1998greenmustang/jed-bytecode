@@ -1,158 +1,286 @@
-use std::{any::Any, ops};
-
 use crate::{
     error::ProgramErrorKind,
-    object::{Object, ObjectData},
+    object::{Object, ObjectKind},
     operation::{Operation, Response},
 };
 
 fn sqrt(operands: &[&Object]) -> Response {
-    match operands[0].data {
-        ObjectData::Integer(i) => Response::FunctionReturn(Some(i.isqrt().into())),
-        ObjectData::Float(f) => Response::FunctionReturn(Some(unsafe { *f }.sqrt().into())),
-        ObjectData::UnsignedInt(_i) => todo!(),
-        _ => Response::Error(ProgramErrorKind::TodoError),
-    }
+    let obj = operands[0];
+    let result = match obj.kind {
+        ObjectKind::Integer => Some(obj.integer().isqrt().into()),
+        ObjectKind::Float => Some(obj.float().sqrt().into()),
+        ObjectKind::UnsignedInt => todo!(),
+        ObjectKind::RustObject => unsafe {
+            let res = (*obj.rust_object()).jed_sqrt();
+            return Response::FunctionReturn(res.map(|o| Box::leak(o).into()));
+        },
+        _ => return Response::Error(ProgramErrorKind::TodoError),
+    };
+    Response::FunctionReturn(result)
 }
 
 pub fn add(operands: &[&Object]) -> Response {
-    match (operands[0].data, operands[1].data) {
-        (ObjectData::Integer(left), ObjectData::Integer(right)) => match left.checked_add(right) {
-            Some(v) => Response::FunctionReturn(Some(v.into())),
-            None => Response::Error(ProgramErrorKind::Overflow(left, right)),
+    let (left, right) = (operands[0], operands[1]);
+    let result = match (left.kind, right.kind) {
+        (ObjectKind::Integer, ObjectKind::Integer) => {
+            Some((left.integer() + right.integer()).into())
+        }
+        (ObjectKind::Float, ObjectKind::Float) => Some((left.float() + right.float()).into()),
+        (ObjectKind::Float, ObjectKind::Integer) => {
+            Some((left.float() + right.integer() as f64).into())
+        }
+        (ObjectKind::Integer, ObjectKind::Float) => {
+            Some((left.integer() as f64 + right.float()).into())
+        }
+        (ObjectKind::String, ObjectKind::String) => todo!(),
+        (ObjectKind::RustObject, ObjectKind::RustObject) => unsafe {
+            let res = (*left.rust_object()).jed_add(*right.rust_object());
+            return Response::FunctionReturn(res.map(|o| Box::leak(o).into()));
         },
-        (ObjectData::Float(left), ObjectData::Float(right)) => {
-            Response::FunctionReturn(Some(unsafe { *left + *right }.into()))
-        }
-        (ObjectData::Float(flt), ObjectData::Integer(int))
-        | (ObjectData::Integer(int), ObjectData::Float(flt)) => {
-            return Response::FunctionReturn(Some((int as f64 + unsafe { *flt }).into()));
-        }
-        (ObjectData::String(_), ObjectData::String(_)) => todo!(),
-        _ => Response::Error(ProgramErrorKind::TodoError),
-    }
+        _ => return Response::Error(ProgramErrorKind::TodoError),
+    };
+    Response::FunctionReturn(result)
 }
 
-type RustSub = dyn ops::Sub<dyn Any, Output = dyn Any>;
 pub fn sub(operands: &[&Object]) -> Response {
-    match (operands[0].data, operands[1].data) {
-        (ObjectData::Integer(left), ObjectData::Integer(right)) => match left.checked_sub(right) {
-            Some(v) => Response::FunctionReturn(Some(v.into())),
-            None => Response::Error(ProgramErrorKind::Overflow(left, right)),
+    let (left, right) = (operands[0], operands[1]);
+    let result = match (left.kind, right.kind) {
+        (ObjectKind::Integer, ObjectKind::Integer) => {
+            match left.integer().checked_sub(right.integer()) {
+                Some(v) => Some(v.into()),
+                None => {
+                    return Response::Error(ProgramErrorKind::Overflow(
+                        left.integer(),
+                        right.integer(),
+                    ));
+                }
+            }
+        }
+        // (ObjectKind::UnsignedInt, ObjectKind::UnsignedInt) => {
+        //     match left.unsigned().checked_sub(right.unsigned()) {
+        //         Some(v) => Some(v.into()),
+        //         None => {
+        //             return Response::Error(
+        //                 ProgramErrorKind::TodoError, // left.unsigned(),
+        //                                              // right.unsigned(),
+        //                                              // )
+        //             );
+        //         }
+        //     }
+        // }
+        (ObjectKind::Float, ObjectKind::Float) => Some((left.float() - right.float()).into()),
+        (ObjectKind::RustObject, ObjectKind::RustObject) => unsafe {
+            let res = (*left.rust_object()).jed_sub(*right.rust_object());
+            return Response::FunctionReturn(res.map(|o| Box::leak(o).into()));
         },
-        (ObjectData::Float(left), ObjectData::Float(right)) => unsafe {
-            let left = *left;
-            let right = *right;
-            Response::FunctionReturn(Some((left - right).into()))
-        },
-        (ObjectData::RustObject(left), ObjectData::RustObject(right)) => unsafe {
-            let res = (*left).jed_sub(*right);
-            Response::ExternReturn(res.map(|o| Box::leak(o).into()))
-        },
-        _ => Response::Error(ProgramErrorKind::TodoError),
-    }
+        _ => return Response::Error(ProgramErrorKind::TypeError(left.kind, right.kind)),
+    };
+    Response::FunctionReturn(result)
 }
+
 pub fn mul(operands: &[&Object]) -> Response {
-    match (operands[0].data, operands[1].data) {
-        (ObjectData::Integer(left), ObjectData::Integer(right)) => match left.checked_mul(right) {
-            Some(v) => Response::FunctionReturn(Some(v.into())),
-            None => Response::Error(ProgramErrorKind::Overflow(left, right)),
+    let (left, right) = (operands[0], operands[1]);
+    let result = match (left.kind, right.kind) {
+        (ObjectKind::Integer, ObjectKind::Integer) => {
+            match left.integer().checked_mul(right.integer()) {
+                Some(v) => Some(v.into()),
+                None => {
+                    return Response::Error(ProgramErrorKind::Overflow(
+                        left.integer(),
+                        right.integer(),
+                    ));
+                }
+            }
+        }
+        (ObjectKind::Float, ObjectKind::Float) => Some((left.float() * right.float()).into()),
+        (ObjectKind::RustObject, ObjectKind::RustObject) => unsafe {
+            let res = (*left.rust_object()).jed_mul(*right.rust_object());
+            return Response::FunctionReturn(res.map(|o| Box::leak(o).into()));
         },
-        (ObjectData::Float(_), ObjectData::Float(_)) => todo!(),
-        _ => Response::Error(ProgramErrorKind::TodoError),
-    }
+        _ => return Response::Error(ProgramErrorKind::TodoError),
+    };
+    Response::FunctionReturn(result)
 }
+
 pub fn div(operands: &[&Object]) -> Response {
-    match (operands[0].data, operands[1].data) {
-        (ObjectData::Integer(_), ObjectData::Integer(_)) => todo!(),
-        (ObjectData::Float(_), ObjectData::Float(_)) => todo!(),
-        _ => Response::Error(ProgramErrorKind::TodoError),
-    }
+    let (left, right) = (operands[0], operands[1]);
+    let result = match (left.kind, right.kind) {
+        (ObjectKind::Integer, ObjectKind::Integer) => {
+            if right.integer() == 0 {
+                return Response::Error(ProgramErrorKind::DivByZero);
+            }
+            Some((left.integer() / right.integer()).into())
+        }
+        (ObjectKind::Float, ObjectKind::Float) => Some((left.float() / right.float()).into()),
+        (ObjectKind::RustObject, ObjectKind::RustObject) => unsafe {
+            let res = (*left.rust_object()).jed_div(*right.rust_object());
+            return Response::FunctionReturn(res.map(|o| Box::leak(o).into()));
+        },
+        _ => return Response::Error(ProgramErrorKind::TodoError),
+    };
+    Response::FunctionReturn(result)
 }
+
 pub fn modulus(operands: &[&Object]) -> Response {
-    match (operands[0].data, operands[1].data) {
-        (ObjectData::Integer(left), ObjectData::Integer(right)) => {
-            Response::FunctionReturn(Some((left % right).into()))
+    let (left, right) = (operands[0], operands[1]);
+    let result = match (left.kind, right.kind) {
+        (ObjectKind::Integer, ObjectKind::Integer) => {
+            if right.integer() == 0 {
+                return Response::Error(ProgramErrorKind::DivByZero);
+            }
+            Some((left.integer() % right.integer()).into())
         }
-        (ObjectData::Float(_), ObjectData::Float(_)) => todo!(),
-        _ => Response::Error(ProgramErrorKind::TodoError),
-    }
+        (ObjectKind::Float, ObjectKind::Float) => Some((left.float() % right.float()).into()),
+        (ObjectKind::RustObject, ObjectKind::RustObject) => unsafe {
+            let res = (*left.rust_object()).jed_mod(*right.rust_object());
+            return Response::FunctionReturn(res.map(|o| Box::leak(o).into()));
+        },
+        _ => return Response::Error(ProgramErrorKind::TodoError),
+    };
+    Response::FunctionReturn(result)
 }
+
 pub fn eq(operands: &[&Object]) -> Response {
-    match (operands[0].data, operands[1].data) {
-        (ObjectData::Integer(left), ObjectData::Integer(right)) => {
-            Response::FunctionReturn(Some((left == right).into()))
+    let (left, right) = (operands[0], operands[1]);
+    let result = match (left.kind, right.kind) {
+        (ObjectKind::Integer, ObjectKind::Integer) => {
+            Some((left.integer() == right.integer()).into())
         }
-        (ObjectData::Float(_), ObjectData::Float(_)) => todo!(),
-        _ => Response::Error(ProgramErrorKind::TodoError),
-    }
+        (ObjectKind::Float, ObjectKind::Float) => Some((left.float() == right.float()).into()),
+        (ObjectKind::RustObject, ObjectKind::RustObject) => unsafe {
+            let res = (*left.rust_object()).jed_eq(*right.rust_object());
+            return Response::FunctionReturn(res.map(|o| o.into()));
+        },
+        _ => return Response::Error(ProgramErrorKind::TodoError),
+    };
+    Response::FunctionReturn(result)
 }
+
 pub fn lesser(operands: &[&Object]) -> Response {
-    match (operands[0].data, operands[1].data) {
-        (ObjectData::Integer(_), ObjectData::Integer(_)) => todo!(),
-        (ObjectData::Float(_), ObjectData::Float(_)) => todo!(),
-        _ => Response::Error(ProgramErrorKind::TodoError),
-    }
+    let (left, right) = (operands[0], operands[1]);
+    let result = match (left.kind, right.kind) {
+        (ObjectKind::Integer, ObjectKind::Integer) => {
+            Some((left.integer() < right.integer()).into())
+        }
+        (ObjectKind::Float, ObjectKind::Float) => Some((left.float() < right.float()).into()),
+        (ObjectKind::RustObject, ObjectKind::RustObject) => unsafe {
+            let res = (*left.rust_object()).jed_lt(*right.rust_object());
+            return Response::FunctionReturn(res.map(|o| o.into()));
+        },
+        _ => return Response::Error(ProgramErrorKind::TodoError),
+    };
+    Response::FunctionReturn(result)
 }
+
 pub fn greater(operands: &[&Object]) -> Response {
-    match (operands[0].data, operands[1].data) {
-        (ObjectData::Integer(_), ObjectData::Integer(_)) => todo!(),
-        (ObjectData::Float(_), ObjectData::Float(_)) => todo!(),
-        _ => Response::Error(ProgramErrorKind::TodoError),
-    }
+    let (left, right) = (operands[0], operands[1]);
+    let result = match (left.kind, right.kind) {
+        (ObjectKind::Integer, ObjectKind::Integer) => {
+            Some((left.integer() > right.integer()).into())
+        }
+        (ObjectKind::Float, ObjectKind::Float) => Some((left.float() > right.float()).into()),
+        (ObjectKind::RustObject, ObjectKind::RustObject) => unsafe {
+            let res = (*left.rust_object()).jed_gt(*right.rust_object());
+            return Response::FunctionReturn(res.map(|o| o.into()));
+        },
+        _ => return Response::Error(ProgramErrorKind::TodoError),
+    };
+    Response::FunctionReturn(result)
 }
+
 pub fn lesseq(operands: &[&Object]) -> Response {
-    match (operands[0].data, operands[1].data) {
-        (ObjectData::Integer(left), ObjectData::Integer(right)) => {
-            Response::FunctionReturn(Some((left <= right).into()))
+    let (left, right) = (operands[0], operands[1]);
+    let result = match (left.kind, right.kind) {
+        (ObjectKind::Integer, ObjectKind::Integer) => {
+            Some((left.integer() <= right.integer()).into())
         }
-        // (ObjectData::Float(lefti, leftp), ObjectData::Float(lefti, leftp)) => left <= right,
-        _ => Response::Error(ProgramErrorKind::TodoError),
-    }
+        (ObjectKind::Float, ObjectKind::Float) => Some((left.float() <= right.float()).into()),
+        (ObjectKind::RustObject, ObjectKind::RustObject) => unsafe {
+            let res = (*left.rust_object()).jed_le(*right.rust_object());
+            return Response::FunctionReturn(res.map(|o| o.into()));
+        },
+        _ => return Response::Error(ProgramErrorKind::TodoError),
+    };
+    Response::FunctionReturn(result)
 }
+
 pub fn greateq(operands: &[&Object]) -> Response {
-    match (operands[0].data, operands[1].data) {
-        (ObjectData::Integer(_), ObjectData::Integer(_)) => todo!(),
-        (ObjectData::Float(_), ObjectData::Float(_)) => todo!(),
-        _ => Response::Error(ProgramErrorKind::TodoError),
-    }
+    let (left, right) = (operands[0], operands[1]);
+    let result = match (left.kind, right.kind) {
+        (ObjectKind::Integer, ObjectKind::Integer) => {
+            Some((left.integer() >= right.integer()).into())
+        }
+        (ObjectKind::Float, ObjectKind::Float) => Some((left.float() >= right.float()).into()),
+        (ObjectKind::RustObject, ObjectKind::RustObject) => unsafe {
+            let res = (*left.rust_object()).jed_ge(*right.rust_object());
+            return Response::FunctionReturn(res.map(|o| o.into()));
+        },
+        _ => return Response::Error(ProgramErrorKind::TodoError),
+    };
+    Response::FunctionReturn(result)
 }
+
 pub fn and(operands: &[&Object]) -> Response {
-    match (operands[0].data, operands[1].data) {
-        (ObjectData::Bool(left), ObjectData::Bool(right)) => {
-            Response::FunctionReturn(Some((left && right).into()))
-        }
-        _ => Response::Error(ProgramErrorKind::TodoError),
-    }
+    let (left, right) = (operands[0], operands[1]);
+    let result = match (left.kind, right.kind) {
+        (ObjectKind::Bool, ObjectKind::Bool) => Some((left.bool() && right.bool()).into()),
+        (ObjectKind::RustObject, ObjectKind::RustObject) => unsafe {
+            let res = (*left.rust_object()).jed_and(*right.rust_object());
+            return Response::FunctionReturn(res.map(|o| o.into()));
+        },
+        _ => return Response::Error(ProgramErrorKind::TodoError),
+    };
+    Response::FunctionReturn(result)
 }
+
 pub fn or(operands: &[&Object]) -> Response {
-    match (operands[0].data, operands[1].data) {
-        (ObjectData::Bool(left), ObjectData::Bool(right)) => {
-            Response::FunctionReturn(Some((left || right).into()))
-        }
-        _ => Response::Error(ProgramErrorKind::TodoError),
-    }
+    let (left, right) = (operands[0], operands[1]);
+    let result = match (left.kind, right.kind) {
+        (ObjectKind::Bool, ObjectKind::Bool) => Some((left.bool() || right.bool()).into()),
+        (ObjectKind::RustObject, ObjectKind::RustObject) => unsafe {
+            let res = (*left.rust_object()).jed_or(*right.rust_object());
+            return Response::FunctionReturn(res.map(|o| o.into()));
+        },
+        _ => return Response::Error(ProgramErrorKind::TodoError),
+    };
+    Response::FunctionReturn(result)
 }
 
 pub fn pow(operands: &[&Object]) -> Response {
-    match (operands[0].data, operands[1].data) {
-        (ObjectData::Integer(left), ObjectData::Integer(right)) => {
-            Response::FunctionReturn(Some(left.pow(right.try_into().expect("no")).into()))
+    let (left, right) = (operands[0], operands[1]);
+    let result = match (left.kind, right.kind) {
+        (ObjectKind::Integer, ObjectKind::Integer) => {
+            let exp: u32 = right.integer().try_into().expect("exponent too large");
+            Some(left.integer().pow(exp).into())
         }
-        (ObjectData::Float(_), ObjectData::Float(_)) => todo!(),
-        _ => Response::Error(ProgramErrorKind::TodoError),
-    }
+        (ObjectKind::Float, ObjectKind::Float) => Some((left.float().powf(right.float())).into()),
+        (ObjectKind::RustObject, ObjectKind::RustObject) => unsafe {
+            let res = (*left.rust_object()).jed_pow(*right.rust_object());
+            return Response::FunctionReturn(res.map(|o| Box::leak(o).into()));
+        },
+        _ => return Response::Error(ProgramErrorKind::TodoError),
+    };
+    Response::FunctionReturn(result)
 }
 
 pub fn root(operands: &[&Object]) -> Response {
-    match (operands[0].data, operands[1].data) {
-        (ObjectData::Integer(left), ObjectData::Integer(right)) => {
-            println!("root(int, int): do not use");
-            Response::FunctionReturn(Some(left.pow((1 / right).try_into().expect("no")).into()))
+    let (left, right) = (operands[0], operands[1]);
+    let result = match (left.kind, right.kind) {
+        (ObjectKind::Integer, ObjectKind::Integer) => {
+            // root(x, y) is equivalent to x^(1/y)
+            let exp = 1.0 / right.float() as f64;
+            Some((left.float() as f64).powf(exp).into())
         }
-        (ObjectData::Float(_), ObjectData::Float(_)) => todo!(),
-        _ => Response::Error(ProgramErrorKind::TodoError),
-    }
+        (ObjectKind::Float, ObjectKind::Float) => {
+            Some((left.float().powf(1.0 / right.float())).into())
+        }
+        (ObjectKind::RustObject, ObjectKind::RustObject) => unsafe {
+            let res = (*left.rust_object()).jed_root(*right.rust_object());
+            return Response::FunctionReturn(res.map(|o| Box::leak(o).into()));
+        },
+        _ => return Response::Error(ProgramErrorKind::TodoError),
+    };
+    Response::FunctionReturn(result)
 }
 
 pub const FUNCTIONS: &[Operation] = &[
@@ -172,7 +300,6 @@ pub const FUNCTIONS: &[Operation] = &[
     Operation::ExternFunc(b"jedop_pow", 2, pow),
     Operation::ExternFunc(b"jedop_root", 2, root),
 ];
-
 // TODO list of operator functions i want to support
 // pub enum BinOpKind {
 //     // Additive

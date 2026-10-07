@@ -1,10 +1,10 @@
 use super::chunk::Chunk;
-use super::{HUGE_PAGE, PAGE, align_down, align_up, list::List, stack::Stack};
+use super::{HUGE_PAGE, PAGE, align_down, align_up, list::List};
 use std::slice;
 use std::{
     alloc::Layout,
     cell::{Cell, RefCell},
-    cmp, mem, ptr,
+    cmp, ptr,
 };
 
 #[derive(Debug)]
@@ -345,7 +345,7 @@ mod tests {
         let saved_bytes = manual.alloc_slice(&slice);
         dbg!("saved_bytes: ");
 
-        let saved_bytes: &'static [u8] = unsafe { &*(saved_bytes as *const [u8]) };
+        let _saved_bytes: &'static [u8] = unsafe { &*(saved_bytes as *const [u8]) };
         dbg!("saved_bytes: ");
 
         // assert_eq!(manual.chunks.borrow_mut().len(), 1);

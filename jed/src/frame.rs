@@ -1,6 +1,6 @@
-use std::{cell::RefCell, collections::BTreeMap, rc::Rc};
+use std::{cell::RefCell, rc::Rc};
 
-use crate::{memory::list::List, object::Object, program::MemoKey};
+use crate::{memory::list::List, object::Object};
 
 #[derive(PartialEq, Eq, Debug, Clone)]
 pub enum FrameKind {
@@ -14,12 +14,11 @@ pub enum FrameKind {
     RangeLoop,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct Frame {
     // String -> Literal
     pub locals: Rc<RefCell<List<&'static Object>>>,
     pub return_address: usize,
-    pub memo_key: MemoKey,
     pub kind: FrameKind,
     pub internal: Option<&'static Object>,
 }
@@ -27,7 +26,6 @@ pub struct Frame {
 impl Frame {
     pub fn new(return_address: usize, kind: FrameKind) -> Self {
         Frame {
-            memo_key: (&[], &[]),
             locals: Rc::new(RefCell::new(List::new())),
             return_address,
             kind,

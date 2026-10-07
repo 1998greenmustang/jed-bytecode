@@ -92,6 +92,18 @@ impl<T> List<T> {
         self.len += 1;
     }
 
+    pub fn push_slice(&mut self, elems: &[T]) {
+        if (self.len + elems.len()) >= self.cap {
+            self.grow();
+        }
+        unsafe {
+            let dst = self.ptr.add(self.len).as_ptr();
+            ptr::copy_nonoverlapping(elems.as_ptr(), dst, elems.len());
+        }
+        self.len += elems.len();
+        self.len += 1;
+    }
+
     pub fn pop(&mut self) -> Option<T> {
         if self.len == 0 {
             None
@@ -271,6 +283,10 @@ impl<T> List<T> {
         }
         return None;
     }
+
+    pub fn as_slice(&self) -> &[T] {
+        unsafe { &*ptr::slice_from_raw_parts_mut(self.ptr.as_ptr(), self.len) }
+    }
 }
 
 impl<T> Drop for List<T> {
@@ -343,7 +359,7 @@ impl<T> ListIter<T> {
     }
 }
 
-impl<T: std::fmt::Debug> Iterator for ListIter<T> {
+impl<T> Iterator for ListIter<T> {
     type Item = &'static T;
     #[inline]
     fn next(&mut self) -> Option<Self::Item> {
@@ -358,7 +374,7 @@ impl<T: std::fmt::Debug> Iterator for ListIter<T> {
     }
 }
 
-impl<T: std::fmt::Debug> DoubleEndedIterator for ListIter<T> {
+impl<T> DoubleEndedIterator for ListIter<T> {
     #[inline]
     fn next_back(&mut self) -> Option<Self::Item> {
         if self.ptr != self.end {

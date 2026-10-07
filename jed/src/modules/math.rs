@@ -1,13 +1,16 @@
 use crate::{
     error::ProgramErrorKind,
-    object::{Object, ObjectData, ObjectKind},
+    object::{Object, ObjectKind},
     operation::{Operation, Response},
 };
 
 fn sin(args: &[&Object]) -> Response {
-    match args[0].data {
-        ObjectData::Integer(n) => Response::ExternReturn(Some(((n as f64).sin() as isize).into())),
-        ObjectData::Float(n) => Response::ExternReturn(Some(unsafe { *n }.sin().into())),
+    let obj = args[0];
+    match obj.kind {
+        ObjectKind::Integer => {
+            Response::FunctionReturn(Some(((obj.integer() as f64).sin() as i64).into()))
+        }
+        ObjectKind::Float => Response::FunctionReturn(Some(obj.float().sin().into())),
         _ => Response::Error(ProgramErrorKind::TypeError(
             ObjectKind::Integer,
             args[0].kind,
@@ -16,9 +19,12 @@ fn sin(args: &[&Object]) -> Response {
 }
 
 fn cos(args: &[&Object]) -> Response {
-    match args[0].data {
-        ObjectData::Integer(n) => Response::ExternReturn(Some(((n as f64).cos() as isize).into())),
-        ObjectData::Float(n) => Response::ExternReturn(Some(unsafe { *n }.cos().into())),
+    let obj = args[0];
+    match obj.kind {
+        ObjectKind::Integer => {
+            Response::FunctionReturn(Some(((obj.integer() as f64).cos() as i64).into()))
+        }
+        ObjectKind::Float => Response::FunctionReturn(Some(obj.float().cos().into())),
         _ => Response::Error(ProgramErrorKind::TypeError(
             ObjectKind::Integer,
             args[0].kind,
@@ -26,6 +32,7 @@ fn cos(args: &[&Object]) -> Response {
     }
 }
 
+pub const INTERNAL: bool = false;
 pub const MODULE: &[u8] = b"math";
 pub const FUNCTIONS: &[Operation] = &[
     Operation::ExternFunc(b"sin", 1, sin),

@@ -1,9 +1,8 @@
 use std::{
-    collections::{BTreeMap, HashMap},
+    collections::BTreeMap,
     fs::File,
     io::{self},
     mem::ManuallyDrop,
-    ptr::slice_from_raw_parts_mut,
     rc::Rc,
 };
 
@@ -11,7 +10,6 @@ use jed_macros::match_ops;
 
 use crate::{
     error::{
-        self,
         ProgramErrorKind::{ParsingError, TodoError},
         Result,
     },
@@ -25,9 +23,6 @@ use crate::{
 type Arity = usize;
 type Index = usize;
 
-pub type MemoKey = (&'static [u8], &'static [Object]);
-type MemoTable = HashMap<MemoKey, Object>;
-
 pub struct Program {
     pub string_arena: Dropless,
     pub saved_strings: BTreeMap<String, &'static [u8]>,
@@ -35,7 +30,6 @@ pub struct Program {
     pub funcs: BTreeMap<&'static [u8], Operation>,
     pub constructors: BTreeMap<&'static [u8], Operation>,
     pub consts: ManuallyDrop<List<Object>>,
-    pub memos: MemoTable,
     pub blocks: Vec<Block>,
 }
 
@@ -48,7 +42,6 @@ impl Program {
             funcs: BTreeMap::new(),
             constructors: BTreeMap::new(),
             blocks: Vec::new(),
-            memos: HashMap::new(),
             consts: ManuallyDrop::new(List::new()),
         };
         // register keywords/stuff that not be added later
@@ -99,13 +92,6 @@ impl Program {
         let saved_bytes = self.string_arena.alloc_slice(objects);
         let saved_bytes: &'static [Object] = unsafe { &*(saved_bytes as *const [Object]) };
         saved_bytes
-    }
-
-    pub fn get_memo(&self, key: MemoKey) -> Option<&Object> {
-        self.memos.get(&key)
-    }
-    pub fn set_memo(&mut self, key: MemoKey, result: Object) {
-        self.memos.insert(key, result);
     }
 
     pub fn to_file(&self, _file: &mut File) -> io::Result<()> {
@@ -355,10 +341,10 @@ impl Program {
             self.consts.push(false.into());
             Ok(())
         } else if string == "Nil" {
-            self.consts.push(Object::nil());
+            self.consts.push(Object::new_nil());
             Ok(())
         } else if string.chars().all(|c| c.is_numeric()) {
-            let num: isize = match utils::string_to_t(string) {
+            let num: i64 = match utils::string_to_t(string) {
                 Ok(v) => v,
                 Err(e) => return Err(e),
             };
