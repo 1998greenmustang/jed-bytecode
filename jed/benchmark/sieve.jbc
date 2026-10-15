@@ -19,7 +19,7 @@ func main 0 {
 	push_many_const 3 # true
 	create_list
 
-	store 1
+	store 0
 
 	# falsify prime index
 	# range(2, math.sqrt(n) + 1)
@@ -34,7 +34,7 @@ func main 0 {
 
 	range_loop {
 		store_temp
-		push 1
+		push 0
 		push_temp
 		list_get
 
@@ -51,14 +51,14 @@ func main 0 {
 			range_loop {
 				store_temp
 				push_const 2 # false
-				push 1
+				push 0
 				push_temp
 				list_set
 			}
 		}
 	}
 
-	push 1
+	push 0
 	create_iter
 	iterate {
 		do_if {
@@ -68,10 +68,14 @@ func main 0 {
 	}
 }
 
-call time:now
-store 0
-call main
-call time:now
-push 0
-bin_op -
-call io:println
+func main2 0 {
+	call time:now
+	store 0
+	call main
+	call time:now
+	push 0
+	bin_op -
+	call io:println
+}
+
+call main2

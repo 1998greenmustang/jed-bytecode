@@ -1,2 +1,2 @@
 sieve:
-    hyperfine '../target/release/jed run sieve_of_eratosthenes.jed' 'python3 sieve.py' -N --runs 100
+    hyperfine '../target/release/jed run sieve.jbc' 'python3 sieve.py' -N --runs 100
