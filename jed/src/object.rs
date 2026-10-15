@@ -10,9 +10,6 @@ use std::{
     mem::ManuallyDrop,
 };
 
-pub type MutableObject = &'static mut Object;
-pub type RegObject = &'static Object;
-
 #[repr(u8)]
 #[derive(Debug, Hash, Eq, PartialEq, Copy, Clone, PartialOrd, Ord)]
 pub enum ObjectKind {
@@ -45,10 +42,10 @@ pub union ObjectData {
     pub unsigned: u64,
     pub bytes: &'static [u8],
     pub boolean: bool,
-    pub list: *mut ManuallyDrop<List<RegObject>>,
-    pub object: *mut RegObject,
-    pub listiter: *mut ListIter<RegObject>,
-    pub hashmap: *mut HashMap<&'static [u8], RegObject>,
+    pub list: *mut ManuallyDrop<List<Object>>,
+    pub object: *mut Object,
+    pub listiter: *mut ListIter<Object>,
+    pub hashmap: *mut HashMap<&'static [u8], Object>,
     pub rustobj: *mut &'static dyn RustObject,
     nil: u64,
 }
@@ -132,7 +129,7 @@ impl Object {
         }
     }
     #[inline]
-    pub fn new_pointer(data: *mut RegObject) -> Self {
+    pub fn new_pointer(data: *mut Object) -> Self {
         Self {
             kind: Pointer,
             data: ObjectData { object: data },
@@ -146,14 +143,14 @@ impl Object {
         }
     }
     #[inline]
-    pub fn new_list(data: *mut ManuallyDrop<List<RegObject>>) -> Self {
+    pub fn new_list(data: *mut ManuallyDrop<List<Object>>) -> Self {
         Self {
             kind: List,
             data: ObjectData { list: data },
         }
     }
     #[inline]
-    pub fn new_iterator(data: *mut ListIter<RegObject>) -> Self {
+    pub fn new_iterator(data: *mut ListIter<Object>) -> Self {
         Self {
             kind: Iterator,
             data: ObjectData { listiter: data },
@@ -169,7 +166,7 @@ impl Object {
         }
     }
     #[inline]
-    pub fn new_data(data: *mut HashMap<&'static [u8], RegObject>) -> Self {
+    pub fn new_data(data: *mut HashMap<&'static [u8], Object>) -> Self {
         Self {
             kind: Data,
             data: ObjectData { hashmap: data },
@@ -203,15 +200,15 @@ impl Object {
         unsafe { self.data.bytes }
     }
     #[inline]
-    pub fn pointer(&self) -> *mut RegObject {
+    pub fn pointer(&self) -> *mut Object {
         unsafe { self.data.object }
     }
     #[inline]
-    pub fn list(&self) -> *mut ManuallyDrop<List<RegObject>> {
+    pub fn list(&self) -> *mut ManuallyDrop<List<Object>> {
         unsafe { self.data.list }
     }
     #[inline]
-    pub fn iterator(&self) -> *mut ListIter<RegObject> {
+    pub fn iterator(&self) -> *mut ListIter<Object> {
         unsafe { self.data.listiter }
     }
     #[inline]
@@ -221,7 +218,7 @@ impl Object {
         unsafe { self.data.unsigned }
     }
     #[inline]
-    pub fn data(&self) -> *mut HashMap<&'static [u8], RegObject> {
+    pub fn data(&self) -> *mut HashMap<&'static [u8], Object> {
         unsafe { self.data.hashmap }
     }
     #[inline]

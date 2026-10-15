@@ -1,10 +1,12 @@
+use std::fmt::Display;
+
 use crate::{
     error::ProgramErrorKind,
     object::{Object, ObjectKind},
     operation::{Operation, Response},
 };
 
-fn sqrt(operands: &[&Object]) -> Response {
+fn sqrt(operands: &[Object]) -> Response {
     let obj = operands[0];
     let result = match obj.kind {
         ObjectKind::Integer => Some(obj.integer().isqrt().into()),
@@ -12,14 +14,14 @@ fn sqrt(operands: &[&Object]) -> Response {
         ObjectKind::UnsignedInt => todo!(),
         ObjectKind::RustObject => unsafe {
             let res = (*obj.rust_object()).jed_sqrt();
-            return Response::FunctionReturn(res.map(|o| Box::leak(o).into()));
+            return Response::ExternReturn(res.map(|o| Box::leak(o).into()));
         },
         _ => return Response::Error(ProgramErrorKind::TodoError),
     };
-    Response::FunctionReturn(result)
+    Response::ExternReturn(result)
 }
 
-pub fn add(operands: &[&Object]) -> Response {
+pub fn add(operands: &[Object]) -> Response {
     let (left, right) = (operands[0], operands[1]);
     let result = match (left.kind, right.kind) {
         (ObjectKind::Integer, ObjectKind::Integer) => {
@@ -42,7 +44,7 @@ pub fn add(operands: &[&Object]) -> Response {
     Response::FunctionReturn(result)
 }
 
-pub fn sub(operands: &[&Object]) -> Response {
+pub fn sub(operands: &[Object]) -> Response {
     let (left, right) = (operands[0], operands[1]);
     let result = match (left.kind, right.kind) {
         (ObjectKind::Integer, ObjectKind::Integer) => {
@@ -78,7 +80,7 @@ pub fn sub(operands: &[&Object]) -> Response {
     Response::FunctionReturn(result)
 }
 
-pub fn mul(operands: &[&Object]) -> Response {
+pub fn mul(operands: &[Object]) -> Response {
     let (left, right) = (operands[0], operands[1]);
     let result = match (left.kind, right.kind) {
         (ObjectKind::Integer, ObjectKind::Integer) => {
@@ -102,7 +104,7 @@ pub fn mul(operands: &[&Object]) -> Response {
     Response::FunctionReturn(result)
 }
 
-pub fn div(operands: &[&Object]) -> Response {
+pub fn div(operands: &[Object]) -> Response {
     let (left, right) = (operands[0], operands[1]);
     let result = match (left.kind, right.kind) {
         (ObjectKind::Integer, ObjectKind::Integer) => {
@@ -121,7 +123,7 @@ pub fn div(operands: &[&Object]) -> Response {
     Response::FunctionReturn(result)
 }
 
-pub fn modulus(operands: &[&Object]) -> Response {
+pub fn modulus(operands: &[Object]) -> Response {
     let (left, right) = (operands[0], operands[1]);
     let result = match (left.kind, right.kind) {
         (ObjectKind::Integer, ObjectKind::Integer) => {
@@ -140,7 +142,7 @@ pub fn modulus(operands: &[&Object]) -> Response {
     Response::FunctionReturn(result)
 }
 
-pub fn eq(operands: &[&Object]) -> Response {
+pub fn eq(operands: &[Object]) -> Response {
     let (left, right) = (operands[0], operands[1]);
     let result = match (left.kind, right.kind) {
         (ObjectKind::Integer, ObjectKind::Integer) => {
@@ -156,7 +158,7 @@ pub fn eq(operands: &[&Object]) -> Response {
     Response::FunctionReturn(result)
 }
 
-pub fn lesser(operands: &[&Object]) -> Response {
+pub fn lesser(operands: &[Object]) -> Response {
     let (left, right) = (operands[0], operands[1]);
     let result = match (left.kind, right.kind) {
         (ObjectKind::Integer, ObjectKind::Integer) => {
@@ -172,7 +174,7 @@ pub fn lesser(operands: &[&Object]) -> Response {
     Response::FunctionReturn(result)
 }
 
-pub fn greater(operands: &[&Object]) -> Response {
+pub fn greater(operands: &[Object]) -> Response {
     let (left, right) = (operands[0], operands[1]);
     let result = match (left.kind, right.kind) {
         (ObjectKind::Integer, ObjectKind::Integer) => {
@@ -188,7 +190,7 @@ pub fn greater(operands: &[&Object]) -> Response {
     Response::FunctionReturn(result)
 }
 
-pub fn lesseq(operands: &[&Object]) -> Response {
+pub fn lesseq(operands: &[Object]) -> Response {
     let (left, right) = (operands[0], operands[1]);
     let result = match (left.kind, right.kind) {
         (ObjectKind::Integer, ObjectKind::Integer) => {
@@ -204,7 +206,7 @@ pub fn lesseq(operands: &[&Object]) -> Response {
     Response::FunctionReturn(result)
 }
 
-pub fn greateq(operands: &[&Object]) -> Response {
+pub fn greateq(operands: &[Object]) -> Response {
     let (left, right) = (operands[0], operands[1]);
     let result = match (left.kind, right.kind) {
         (ObjectKind::Integer, ObjectKind::Integer) => {
@@ -220,7 +222,7 @@ pub fn greateq(operands: &[&Object]) -> Response {
     Response::FunctionReturn(result)
 }
 
-pub fn and(operands: &[&Object]) -> Response {
+pub fn and(operands: &[Object]) -> Response {
     let (left, right) = (operands[0], operands[1]);
     let result = match (left.kind, right.kind) {
         (ObjectKind::Bool, ObjectKind::Bool) => Some((left.bool() && right.bool()).into()),
@@ -233,7 +235,7 @@ pub fn and(operands: &[&Object]) -> Response {
     Response::FunctionReturn(result)
 }
 
-pub fn or(operands: &[&Object]) -> Response {
+pub fn or(operands: &[Object]) -> Response {
     let (left, right) = (operands[0], operands[1]);
     let result = match (left.kind, right.kind) {
         (ObjectKind::Bool, ObjectKind::Bool) => Some((left.bool() || right.bool()).into()),
@@ -246,7 +248,7 @@ pub fn or(operands: &[&Object]) -> Response {
     Response::FunctionReturn(result)
 }
 
-pub fn pow(operands: &[&Object]) -> Response {
+pub fn pow(operands: &[Object]) -> Response {
     let (left, right) = (operands[0], operands[1]);
     let result = match (left.kind, right.kind) {
         (ObjectKind::Integer, ObjectKind::Integer) => {
@@ -263,7 +265,7 @@ pub fn pow(operands: &[&Object]) -> Response {
     Response::FunctionReturn(result)
 }
 
-pub fn root(operands: &[&Object]) -> Response {
+pub fn root(operands: &[Object]) -> Response {
     let (left, right) = (operands[0], operands[1]);
     let result = match (left.kind, right.kind) {
         (ObjectKind::Integer, ObjectKind::Integer) => {
@@ -301,32 +303,59 @@ pub const FUNCTIONS: &[Operation] = &[
     Operation::ExternFunc(b"jedop_root", 2, root),
 ];
 // TODO list of operator functions i want to support
-// pub enum BinOpKind {
-//     // Additive
-//     Add,
-//     Sub,
+#[derive(Clone, Debug)]
+pub enum BinOpKind {
+    // Additive
+    Add,
+    Sub,
 
-//     // Multiplicative
-//     Mul,
-//     Div,
-//     Mod,
+    // Multiplicative
+    Mul,
+    Div,
+    Mod,
 
-//     // Exponetial
-//     Power,
-//     Root,
+    // Exponetial
+    Power,
+    Root,
 
-//     // Comparitive
-//     Eq,
-//     LessEq,
-//     GreatEq,
-//     Lesser,
-//     Greater,
-//     And,
-//     Or,
+    // Comparitive
+    Eq,
+    LessEq,
+    GreatEq,
+    Lesser,
+    Greater,
+    And,
+    Or,
 
-//     // Bitwise
-//     BitAnd,
-//     BitOr,
-//     Xor,
-//     BitShLeft,
-//     BitShRight,
+    // Bitwise
+    BitAnd,
+    BitOr,
+    Xor,
+    BitShLeft,
+    BitShRight,
+}
+impl Display for BinOpKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            BinOpKind::Add => write!(f, "+"),
+            BinOpKind::Sub => write!(f, "-"),
+            BinOpKind::Mul => write!(f, "*"),
+            BinOpKind::Div => write!(f, "/"),
+            BinOpKind::Mod => write!(f, "%"),
+            BinOpKind::Power => write!(f, "**"),
+            BinOpKind::Root => write!(f, "root"),
+            BinOpKind::Eq => write!(f, "="),
+            BinOpKind::LessEq => write!(f, "<="),
+            BinOpKind::GreatEq => write!(f, ">="),
+            BinOpKind::Lesser => write!(f, "<"),
+            BinOpKind::Greater => write!(f, ">"),
+            BinOpKind::And => write!(f, "&&"),
+            BinOpKind::Or => write!(f, "||"),
+            BinOpKind::BitAnd => write!(f, "&"),
+            BinOpKind::BitOr => write!(f, "|"),
+            BinOpKind::Xor => write!(f, "^"),
+            BinOpKind::BitShLeft => write!(f, "<<"),
+            BinOpKind::BitShRight => write!(f, ">>"),
+        }
+    }
+}

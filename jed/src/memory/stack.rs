@@ -123,6 +123,12 @@ impl<T> Stack<T> {
             Ok(unsafe { &*self.ptr.as_ptr().add(self.len - 1) })
         }
     }
+    pub fn last_unchecked(&self) -> &T {
+        unsafe { self.ptr.as_ptr().add(self.len - 1).as_ref_unchecked() }
+    }
+    pub fn last_mut_unchecked(&self) -> &mut T {
+        unsafe { self.ptr.as_ptr().add(self.len - 1).as_mut_unchecked() }
+    }
     pub fn last_mut(&mut self) -> Result<&mut T, ProgramErrorKind> {
         if self.len == 0 {
             Err(ProgramErrorKind::StackError(1))

@@ -2,10 +2,10 @@ use std::{collections::HashMap, fs::File, io};
 
 use crate::{
     error::{ProgramError, ProgramErrorKind},
-    frame::{Frame, FrameKind},
+    frame::Frame,
     memory::{self, list::List, stack::Stack},
     modules::io::Io,
-    object::{MutableObject, Object, RegObject},
+    object::Object,
     operation::{Operation, Response},
     program::Program,
     span::Span,
@@ -15,27 +15,27 @@ pub struct VM {
     pub program: Program,
     pub counter: usize,
     pub call_stack: Stack<Frame>,
-    pub obj_stack: Stack<RegObject>,
-    pub temp: Option<RegObject>,
-    pub memory: memory::Manual<Object>,
+    pub obj_stack: Stack<Object>,
+    pub temp: Option<Object>,
     pub current_span: Span,
     pub debug: bool,
+    pub locals: Vec<Object>,
     pub io: Io,
 }
 
 impl VM {
     pub fn new(program: Program, debug: bool) -> Self {
         let mut call_stack: Stack<Frame> = Stack::new();
-        call_stack.push(Frame::new(program.instructions.len(), FrameKind::Initial));
+        call_stack.push(Frame::new(0, program.instructions.len()));
         VM {
             call_stack,
             counter: 0,
             program,
             obj_stack: Stack::new(),
             temp: None,
-            memory: Default::default(),
             current_span: Span::empty(),
             debug,
+            locals: vec![],
             io: Io::new(),
         }
     }
@@ -44,11 +44,10 @@ impl VM {
         if let Some(Operation::Object(_name, arity, block)) =
             self.program.constructors.get(name).cloned()
         {
-            let obj =
-                self.register_single(Object::new_data(Box::into_raw(Box::new(HashMap::new()))));
+            let obj = Object::new_data(Box::into_raw(Box::new(HashMap::new())));
             if self.obj_stack.len() >= arity {
                 self.obj_stack.push(obj);
-                self.run_block(&block);
+                self.run_block(&block.0, block.1);
                 Response::Ok
             } else {
                 Response::Error(ProgramErrorKind::StackError(arity))
@@ -71,7 +70,6 @@ impl VM {
                 match res {
                     Response::ExternReturn(maybe_obj) => {
                         if let Some(obj) = maybe_obj {
-                            let obj = self.register_single(obj);
                             self.obj_stack.push(obj);
                         }
                         Response::Ok
@@ -81,126 +79,19 @@ impl VM {
             }
             Some(Operation::Func(_name, arity, block)) => {
                 // println!("{block}");
-                let args = {
-                    match unsafe { self.obj_stack.last_n(arity) } {
-                        Ok(ts) => ts,
-                        Err(_) => return Response::Error(ProgramErrorKind::StackError(arity)),
-                    }
-                };
-                let args = if arity > 0 {
-                    let deferenced: Vec<Object> = args.iter().map(|x| **x).collect();
-                    self.register_many(&deferenced)
-                } else {
-                    &[]
-                };
-                // TODO clean this up, and think do memos even really belong here?
-                // feels like a more high level construct...
-                //
-                // match self.program.get_memo((name, args)).cloned() {
-                //     Some(value) => {
-                //         // println!("YES DUDE {:?}", args);
-                //         match self.obj_stack.pop_n(arity) {
-                //             Ok(ts) => ts,
-                //             Err(_) => return Response::Error(ProgramErrorKind::StackError(arity)),
-                //         };
-                //         let value = self.register_single(value);
-                //         self.obj_stack.push(value);
-                //         Response::Ok
-                //     }
-                //     None => {
-                self.call_stack
-                    .push(Frame::new(self.counter, FrameKind::Call));
-                let _current_frame = match self.call_stack.last_mut() {
+                match unsafe { self.obj_stack.last_n(arity) } {
                     Ok(ts) => ts,
-                    Err(e) => return Response::Error(e),
+                    Err(_) => return Response::Error(ProgramErrorKind::StackError(arity)),
                 };
-                let _args = if args.len() > 0 {
-                    self.program.register_arguments(args)
-                } else {
-                    args
-                };
-                // current_frame.memo_key = (name, args);
-                self.run_block(&block.clone());
+                let frame = Frame::new(self.locals.len(), self.counter);
+                self.call_stack.push(frame);
+                self.run_block(&block.0, block.1);
                 let frame = self.call_stack.pop().unwrap();
                 self.goto(frame.return_address);
                 Response::Ok
-                //     }
-                // }
-                // Response::Ok
             }
             _ => Response::Error(ProgramErrorKind::FunctionExists(name)),
         }
-    }
-
-    pub fn register_single(&mut self, obj: Object) -> RegObject {
-        let saved_bytes = self.memory.alloc(&obj);
-        let saved_bytes: &'static mut Object = saved_bytes;
-        saved_bytes
-    }
-    pub fn register_single_mut(&mut self, obj: Object) -> MutableObject {
-        let saved_bytes = self.memory.alloc_slice(&[obj]);
-        let saved_bytes: &'static mut [Object] = unsafe { &mut *(saved_bytes as *mut [Object]) };
-        unsafe { saved_bytes.get_unchecked_mut(0) }
-    }
-
-    pub fn register_many(&mut self, objs: &[Object]) -> &'static [Object] {
-        let saved_bytes = self.memory.alloc_slice(objs);
-        let saved_bytes: &'static [Object] = unsafe { &*(saved_bytes as *const [Object]) };
-        saved_bytes
-    }
-
-    pub fn resize_list(
-        &mut self,
-        starting_ptr: *mut Object,
-        len: usize,
-        alloc: usize,
-        n: usize,
-    ) -> Result<*const Object, ProgramErrorKind> {
-        if n <= alloc {
-            // shrink it baby
-            // i dont actually want to do
-            // because i do not care
-            return Ok(starting_ptr);
-        } else if n > alloc {
-            // grow it baby
-            let amt_to_alloc = n - alloc;
-            let pretend_ptr = unsafe { starting_ptr.add(alloc).addr() as *const Object };
-            if pretend_ptr == self.memory.start().addr() as *const Object {
-                self.memory.extend_from(starting_ptr, amt_to_alloc);
-                return Ok(starting_ptr);
-            } else {
-                unsafe {
-                    // create new list
-                    let mut objects: Vec<Object> = vec![];
-                    for i in 0..len {
-                        let obj = starting_ptr.add(i);
-                        objects.push(*obj.clone());
-                        self.drop(&*obj);
-                    }
-                    while objects.len() != n {
-                        objects.push(Object::new_nil());
-                    }
-                    let objects: &'static [Object] = self.register_many(&objects);
-                    return Ok(objects.as_ptr());
-                }
-            }
-        }
-        Err(ProgramErrorKind::TodoError)
-    }
-
-    pub fn drop(&mut self, obj: RegObject) {
-        self.memory.deallocate(
-            obj as *const Object as *mut Object,
-            std::alloc::Layout::for_value(obj),
-        );
-    }
-    pub fn drop_list(&mut self, start: *const Object, len: usize) -> &[Object] {
-        let size = size_of::<Object>() * len;
-        self.memory.deallocate(
-            start as *mut Object,
-            std::alloc::Layout::from_size_align(size, align_of::<Object>()).expect("a"),
-        );
-        return &[];
     }
 
     pub fn from_string(text: String, debug: bool) -> Self {
@@ -219,13 +110,7 @@ impl VM {
 
     pub fn run(&mut self) {
         while let Some(op) = self.next() {
-            // println!(
-            //     "{}/{} {:?}",
-            //     self.counter,
-            //     self.program.instructions.len() - 1,
-            //     self.program.instructions.get(self.counter)
-            // );
-            // self.update_span();
+            // println!("{op}");
             if self.call_stack.len() > 100_000 {
                 panic!("call stack overflow");
             }
@@ -244,17 +129,11 @@ impl VM {
                 Response::Ok => continue,
                 Response::BlockReturn => unreachable!(),
                 Response::ExternReturn(obj) => {
-                    obj.map(|o| {
-                        let o = self.register_single(o);
-                        self.obj_stack.push(o)
-                    });
+                    obj.map(|o| self.obj_stack.push(o));
                 }
                 Response::IterationDone => continue,
                 Response::FunctionReturn(obj) => {
-                    obj.map(|o| {
-                        let o = self.register_single(o);
-                        self.obj_stack.push(o)
-                    });
+                    obj.map(|o| self.obj_stack.push(o));
                 }
             }
             // if self.counter == self.program.instructions.len() {
@@ -275,7 +154,11 @@ impl VM {
         }
     }
 
-    pub fn run_block(&mut self, block: &List<Operation>) {
+    pub fn run_block(&mut self, block: &List<Operation>, nlocals: usize) {
+        self.locals.resize(
+            nlocals + self.call_stack.last_unchecked().base,
+            Object::new_nil(),
+        );
         let mut iter = block.iter();
         while let Some(op) = iter.next() {
             // println!("{}", op);
@@ -296,15 +179,14 @@ impl VM {
                 }
                 Response::Ok => continue,
                 Response::IterationDone => {
-                    let _ = self.call_stack.pop();
                     // break;
                 }
                 Response::ExternReturn(_) => unreachable!(),
                 Response::FunctionReturn(Some(obj)) => {
-                    let obj = self.register_single(obj);
-                    self.obj_stack.push(obj)
+                    self.obj_stack.push(obj);
+                    break;
                 }
-                Response::FunctionReturn(None) => continue,
+                Response::FunctionReturn(None) => break,
             }
         }
     }
@@ -396,5 +278,20 @@ impl VM {
         };
 
         ProgramError(e, self.current_span.clone())
+    }
+
+    #[inline]
+    pub fn get_local(&self, idx: usize) -> Object {
+        unsafe {
+            *self
+                .locals
+                .get_unchecked(self.call_stack.last_unchecked().base + idx)
+        }
+    }
+
+    #[inline]
+    pub fn set_local(&mut self, idx: usize, obj: Object) {
+        self.locals
+            .insert(self.call_stack.last_unchecked().base + idx, obj);
     }
 }

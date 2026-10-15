@@ -33,7 +33,7 @@ impl Io {
     }
 }
 
-fn println(args: &[&Object]) -> Response {
+fn println(args: &[Object]) -> Response {
     let stdout = std::io::stdout();
     let mut writer = BufWriter::new(stdout.lock());
 
@@ -41,7 +41,7 @@ fn println(args: &[&Object]) -> Response {
     Response::ExternReturn(None)
 }
 
-fn print(args: &[&Object]) -> Response {
+fn print(args: &[Object]) -> Response {
     let stdout = std::io::stdout();
     let mut writer = BufWriter::new(stdout.lock());
 

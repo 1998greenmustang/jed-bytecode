@@ -1,54 +1,22 @@
-use std::{cell::RefCell, rc::Rc};
-
-use crate::{memory::list::List, object::Object};
-
-#[derive(PartialEq, Eq, Debug, Clone)]
-pub enum FrameKind {
-    DoForLoop,
-    IterateLoop,
-    DoForInLoop,
-    DoIfBlock,
-    Call,
-    Main,
-    Initial,
-    RangeLoop,
-}
+use crate::object::Object;
 
 #[derive(Clone)]
 pub struct Frame {
-    // String -> Literal
-    pub locals: Rc<RefCell<List<&'static Object>>>,
+    pub base: usize,
     pub return_address: usize,
-    pub kind: FrameKind,
-    pub internal: Option<&'static Object>,
+    pub internal: Option<Object>,
 }
 
 impl Frame {
-    pub fn new(return_address: usize, kind: FrameKind) -> Self {
+    pub fn new(base: usize, return_address: usize) -> Self {
         Frame {
-            locals: Rc::new(RefCell::new(List::new())),
+            base,
             return_address,
-            kind,
             internal: None,
         }
     }
 
-    pub fn set_internal(&mut self, obj: &'static Object) {
+    pub fn set_internal(&mut self, obj: Object) {
         self.internal = Some(obj)
-    }
-
-    pub fn add_local(&mut self, name: usize, obj: &'static Object) {
-        // if self.locals.contains_key(name) {
-        //     panic!("{} has already been declared");
-        // }
-        (*self.locals).borrow_mut().insert(name, &obj);
-    }
-
-    pub fn get_local(&self, name: usize) -> Option<&'static Object> {
-        (*self.locals).borrow().get(name).map(|v| *v)
-    }
-
-    pub fn copy_locals(&mut self, other: &Self) {
-        self.locals = other.locals.clone()
     }
 }

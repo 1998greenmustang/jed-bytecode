@@ -3,7 +3,6 @@ use std::{
     fs::File,
     io::{self},
     mem::ManuallyDrop,
-    rc::Rc,
 };
 
 use jed_macros::match_ops;
@@ -14,22 +13,19 @@ use crate::{
         Result,
     },
     memory::{Dropless, list::List, peekableiterator::PeekableIterator},
-    modules,
+    modules::{self, jed::BinOpKind},
     object::Object,
     operation::{Block, Operation},
     utils,
 };
 
-type Arity = usize;
-type Index = usize;
-
 pub struct Program {
     pub string_arena: Dropless,
     pub saved_strings: BTreeMap<String, &'static [u8]>,
-    pub instructions: Block,
+    pub instructions: ManuallyDrop<List<Operation>>,
     pub funcs: BTreeMap<&'static [u8], Operation>,
     pub constructors: BTreeMap<&'static [u8], Operation>,
-    pub consts: ManuallyDrop<List<Object>>,
+    pub consts: Vec<Object>,
     pub blocks: Vec<Block>,
 }
 
@@ -42,7 +38,7 @@ impl Program {
             funcs: BTreeMap::new(),
             constructors: BTreeMap::new(),
             blocks: Vec::new(),
-            consts: ManuallyDrop::new(List::new()),
+            consts: vec![],
         };
         // register keywords/stuff that not be added later
         // probably should be a macro but (:
@@ -175,6 +171,7 @@ impl Program {
                     Pop,
                     Dupe,
                     Swap,
+                    Return,
                     Exit,
                     PushTemp,
                     StoreTemp,
@@ -190,10 +187,32 @@ impl Program {
                     IterCurrent,
                     Debug
                 ]},
+                {BinOp, match Self::parse_token(text).unwrap().as_str() {
+                    "+" => BinOpKind::Add ,
+                    "-" => BinOpKind::Sub ,
+                    "*" => BinOpKind::Mul ,
+                    "/" => BinOpKind::Div ,
+                    "%" => BinOpKind::Mod ,
+                    "**" => BinOpKind::Power ,
+                    "root" => BinOpKind::Root ,
+                    "=" => BinOpKind::Eq ,
+                    "<=" => BinOpKind::LessEq ,
+                    ">=" => BinOpKind::GreatEq ,
+                    "<" => BinOpKind::Lesser ,
+                    ">" => BinOpKind::Greater ,
+                    "&&" => BinOpKind::And ,
+                    "||" => BinOpKind::Or ,
+                    "&" => BinOpKind::BitAnd ,
+                    "|" => BinOpKind::BitOr ,
+                    "^" => BinOpKind::Xor ,
+                    "<<" => BinOpKind::BitShLeft ,
+                    ">>" => BinOpKind::BitShRight ,
+                    _ => panic!(),
+                }}
                 // bytes
                 {[Import, SetAttribute, GetAttribute, CreateObject],
                     self.register(Self::parse_token(text).unwrap().into())},
-                {[PushConst, Push, Store],
+                {[PushConst, Push, Store, ReturnIf],
                     utils::string_to_t(match Self::parse_token(text) {
                         Some(v) if v.chars().all(|c| c.is_numeric()) => v,
                         _ => {
@@ -302,10 +321,19 @@ impl Program {
             ));
             // buffer.push(c);
         }
-        // println!("{}", block);
-        let b = Rc::new(block);
-        self.blocks.push(Rc::clone(&b));
-        return Rc::clone(&b);
+        let block = ManuallyDrop::new(block);
+        let nlocals = block
+            .iter()
+            .map(|x| {
+                if let Operation::Push(n) | Operation::Store(n) = x {
+                    *n
+                } else {
+                    0usize
+                }
+            })
+            .max()
+            .unwrap();
+        return (block, nlocals);
     }
 
     fn remove_comments(text: String) -> String {
@@ -320,7 +348,7 @@ impl Program {
         let text = Self::remove_comments(text);
         let iter = text.chars().into_iter();
         let mut program = Self::new();
-        program.instructions = program.parse_block(&mut iter.collect());
+        program.instructions = program.parse_block(&mut iter.collect()).0;
         program
     }
 
@@ -362,6 +390,7 @@ impl Program {
     pub fn get_const(&self, idx: usize) -> Result<Object> {
         self.consts.get(idx).ok_or(TodoError).copied()
     }
+
     // pub fn get_done(&self, pc: &usize) -> Result<&usize, ProgramErrorKind> {
     //     match self.block_returns.get(pc) {
     //         Some(address) => Ok(address),

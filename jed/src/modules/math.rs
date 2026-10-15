@@ -4,7 +4,7 @@ use crate::{
     operation::{Operation, Response},
 };
 
-fn sin(args: &[&Object]) -> Response {
+fn sin(args: &[Object]) -> Response {
     let obj = args[0];
     match obj.kind {
         ObjectKind::Integer => {
@@ -18,7 +18,7 @@ fn sin(args: &[&Object]) -> Response {
     }
 }
 
-fn cos(args: &[&Object]) -> Response {
+fn cos(args: &[Object]) -> Response {
     let obj = args[0];
     match obj.kind {
         ObjectKind::Integer => {

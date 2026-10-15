@@ -135,6 +135,10 @@ impl<T> List<T> {
         self.len
     }
 
+    pub fn cap(&self) -> usize {
+        self.cap
+    }
+
     pub fn last_mut(&mut self) -> Option<&mut T> {
         if self.len == 0 {
             None
@@ -227,9 +231,9 @@ impl<T> List<T> {
     }
 
     pub fn insert(&mut self, idx: usize, item: T) {
-        if self.len > idx {
+        if self.cap > idx {
             unsafe { std::ptr::copy(&item, self.ptr.add(idx).as_mut(), 1) }
-        } else if self.len == idx {
+        } else if self.cap == idx {
             self.push(item)
         } else {
             panic!("no such index {idx} in a list with length of {}", self.len);

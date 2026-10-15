@@ -10,7 +10,7 @@ use crate::{
     operation::{Operation, Response},
 };
 
-pub fn now(_: &[&Object]) -> Response {
+pub fn now(_: &[Object]) -> Response {
     let data = Instant::now();
     let refr: &'static dyn RustObject = Box::leak(Box::new(data));
     Response::ExternReturn(Some(refr.into()))
