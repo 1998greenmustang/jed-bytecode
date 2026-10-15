@@ -155,10 +155,13 @@ impl VM {
     }
 
     pub fn run_block(&mut self, block: &List<Operation>, nlocals: usize) {
-        self.locals.resize(
-            nlocals + self.call_stack.last_unchecked().base,
-            Object::new_nil(),
-        );
+        // check if i need to add more variable space
+        if self.locals.len() == self.call_stack.last_unchecked().base {
+            self.locals.resize(
+                nlocals + self.call_stack.last_unchecked().base,
+                Object::new_nil(),
+            );
+        }
         let mut iter = block.iter();
         while let Some(op) = iter.next() {
             // println!("{}", op);
@@ -283,6 +286,8 @@ impl VM {
     #[inline]
     pub fn get_local(&self, idx: usize) -> Object {
         unsafe {
+            // println!("{:?}", self.locals);
+            // println!("{idx}, {}", self.call_stack.last_unchecked().base);
             *self
                 .locals
                 .get_unchecked(self.call_stack.last_unchecked().base + idx)

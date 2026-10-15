@@ -326,7 +326,7 @@ impl Program {
             .iter()
             .map(|x| {
                 if let Operation::Push(n) | Operation::Store(n) = x {
-                    *n
+                    *n + 1
                 } else {
                     0usize
                 }

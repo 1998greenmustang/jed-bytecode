@@ -72,6 +72,30 @@ impl Display for Object {
     }
 }
 
+impl Debug for Object {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        unsafe {
+            match self.kind {
+                ObjectKind::Integer => write!(f, "(int: {})", self.data.integer),
+                ObjectKind::Float => write!(f, "(float: {})", self.data.float),
+                ObjectKind::String => {
+                    write!(f, "(string: {})", utils::display_bytes(self.data.bytes))
+                }
+                ObjectKind::Bool => write!(f, "(bool: {})", self.data.boolean),
+                ObjectKind::Func => write!(f, "(func: {})", utils::display_bytes(self.data.bytes)),
+                ObjectKind::Pointer => write!(f, "(ptr: {:p})", self.data.object),
+                ObjectKind::Nil => write!(f, "(Nil)"),
+                ObjectKind::List => write!(f, "(list: {:p})", self.data.list),
+                ObjectKind::Iterator => write!(f, "(iter: {:p})>", self.data.listiter),
+                ObjectKind::UnsignedInt => write!(f, "(uint: {} )", self.data.unsigned),
+                // ObjectKind::Data => write!(f, "{:?}", unsafe { *self.data.hashmap }),
+                ObjectKind::RustObject => (*self.data.rustobj).jed_display(f),
+                _ => todo!("{:?}", self.kind),
+            }
+        }
+    }
+}
+
 impl Display for ObjectKind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
