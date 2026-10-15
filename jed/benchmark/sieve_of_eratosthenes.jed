@@ -1,0 +1,77 @@
+import io
+import time
+
+consts {
+	1000000,
+	1,
+	false,
+	true,
+	2,
+}
+
+func main 0 {
+	# create prime list 
+	push_const 2 #false
+	push_const 2 #false
+	push_const 0 #1000000
+	push_const 1 # 1
+	bin_op -
+	push_many_const 3 # true
+	create_list
+
+	store 1
+
+	# falsify prime index
+	# range(2, math.sqrt(n) + 1)
+	push_const 4 # 2
+
+	push_const 0 # 1000000
+	call jed_sqrt
+	push_const 1 # 1
+	bin_op +
+
+	push_const 1 # 1
+
+	range_loop {
+		store_temp
+		push 1
+		push_temp
+		list_get
+
+		do_if {
+			push_temp
+			push_temp
+			bin_op *
+
+			push_const 0
+			push_const 1 # 1
+			bin_op +
+
+			push_temp
+			range_loop {
+				store_temp
+				push_const 2 # false
+				push 1
+				push_temp
+				list_set
+			}
+		}
+	}
+
+	push 1
+	create_iter
+	iterate {
+		do_if {
+			iter_current
+			call io:println
+		}
+	}
+}
+
+call time:now
+store 0
+call main
+call time:now
+push 0
+bin_op -
+call io:println
